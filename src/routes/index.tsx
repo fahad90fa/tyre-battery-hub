@@ -1,24 +1,45 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { Sidebar } from "@/components/site/Sidebar";
+import { Navbar } from "@/components/site/Navbar";
+import { Hero } from "@/components/site/Hero";
+import { CategoryCards } from "@/components/site/CategoryCards";
+import { Features } from "@/components/site/Features";
+import { PremiumBanner } from "@/components/site/PremiumBanner";
+import { Deals } from "@/components/site/Deals";
+import { Testimonials } from "@/components/site/Testimonials";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
 export const Route = createFileRoute("/")({
-  component: Index,
+  head: () => ({
+    meta: [
+      { title: "MT&B HOUSE — Muzaffar Tyre And Battery House" },
+      {
+        name: "description",
+        content:
+          "Premium tyres, batteries, tubes and car care products from trusted brands. Reliable performance with warranty and expert support.",
+      },
+      { property: "og:title", content: "MT&B HOUSE — Muzaffar Tyre And Battery House" },
+      { property: "og:description", content: "Premium tyres, batteries, tubes and car care from trusted brands." },
+      { property: "og:type", content: "website" },
+    ],
+  }),
+  component: Home,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
-function Index() {
+function Home() {
   return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
+    <div className="min-h-screen bg-background">
+      <Sidebar />
+      <div className="lg:pl-[240px]">
+        <Navbar />
+        <main className="pb-10">
+          <Hero />
+          <CategoryCards />
+          <Features />
+          <PremiumBanner />
+          <Deals />
+          <Testimonials />
+        </main>
+      </div>
     </div>
   );
 }
