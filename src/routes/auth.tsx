@@ -140,27 +140,9 @@ function AuthPage() {
           </Link>
         </motion.div>
 
-        {/* Hero image + copy */}
+        {/* Copy */}
         <div className="relative z-10">
-          <motion.div
-            initial={{ scale: 0.7, opacity: 0, rotate: -20 }}
-            animate={{ scale: 1, opacity: 1, rotate: 0 }}
-            transition={{ duration: 1, ease: "easeOut" }}
-            className="relative mx-auto mb-8 w-64 h-64"
-          >
-            <motion.div
-              className="absolute inset-0 rounded-full blur-2xl bg-gold/40"
-              animate={{ scale: [1, 1.15, 1], opacity: [0.4, 0.7, 0.4] }}
-              transition={{ duration: 4, repeat: Infinity }}
-            />
-            <motion.img
-              src={heroTyre}
-              alt="Premium tyre"
-              className="relative w-full h-full object-contain drop-shadow-2xl"
-              animate={{ rotate: 360 }}
-              transition={{ duration: 40, repeat: Infinity, ease: "linear" }}
-            />
-          </motion.div>
+
 
           <motion.h1
             initial={{ opacity: 0, y: 20 }}
