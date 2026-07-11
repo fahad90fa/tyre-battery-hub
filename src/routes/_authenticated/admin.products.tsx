@@ -123,7 +123,16 @@ function ProductsAdmin() {
           <tbody>
             {rows.map((r) => (
               <tr key={r.id} className="border-t">
-                <td className="p-3 font-medium">{r.product_name}</td>
+                <td className="p-3 font-medium">
+                  <div className="flex items-center gap-3">
+                    {r.image_url ? (
+                      <img src={r.image_url} alt="" className="h-10 w-10 rounded object-cover border" />
+                    ) : (
+                      <div className="h-10 w-10 rounded bg-muted border" />
+                    )}
+                    <span>{r.product_name}</span>
+                  </div>
+                </td>
                 <td className="p-3 text-muted-foreground">{r.categories?.name ?? "—"}</td>
                 <td className="p-3 text-muted-foreground">{r.brands?.name ?? "—"}</td>
                 <td className="p-3">{r.quantity_in_stock}</td>
