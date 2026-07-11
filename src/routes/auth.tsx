@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Wrench, Mail, Lock, User, Sparkles, ShieldCheck, Truck, Zap } from "lucide-react";
-import heroTyre from "@/assets/hero-tyre.jpg";
+
 
 export const Route = createFileRoute("/auth")({
   head: () => ({ meta: [{ title: "Sign in — MT&B HOUSE" }] }),
