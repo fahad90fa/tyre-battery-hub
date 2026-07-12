@@ -150,7 +150,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
   const [current, setCurrent] = useState<number>(party.current_balance);
 
   const load = async () => {
-    const { data: e } = await supabase.from(LEDGER_TABLE[kind]).select("*").eq(FK[kind], party.id).order("entry_date", { ascending: false });
+    const { data: e } = await (supabase.from(LEDGER_TABLE[kind]) as any).select("*").eq(FK[kind], party.id).order("entry_date", { ascending: false });
     setEntries(e ?? []);
     const { data: p } = await supabase.from(kind).select("current_balance").eq("id", party.id).maybeSingle();
     if (p) setCurrent(Number(p.current_balance));
@@ -159,7 +159,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
 
   const add = async () => {
     if (!form.amount || Number(form.amount) <= 0) return toast.error("Amount required");
-    const { error } = await supabase.from(LEDGER_TABLE[kind]).insert({ ...form, [FK[kind]]: party.id, amount: Number(form.amount) });
+    const { error } = await (supabase.from(LEDGER_TABLE[kind]) as any).insert({ ...form, [FK[kind]]: party.id, amount: Number(form.amount) });
     if (error) return toast.error(error.message);
     setForm({ entry_type: TYPES[kind][0].value, amount: 0, reference: "", note: "" });
     toast.success("Entry added"); load(); onChanged();
