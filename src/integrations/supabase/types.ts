@@ -62,6 +62,92 @@ export type Database = {
         }
         Relationships: []
       }
+      client_ledger: {
+        Row: {
+          amount: number
+          client_id: string
+          created_at: string
+          entry_date: string
+          entry_type: string
+          id: string
+          note: string | null
+          reference: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          client_id: string
+          created_at?: string
+          entry_date?: string
+          entry_type: string
+          id?: string
+          note?: string | null
+          reference?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          client_id?: string
+          created_at?: string
+          entry_date?: string
+          entry_type?: string
+          id?: string
+          note?: string | null
+          reference?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_ledger_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clients: {
+        Row: {
+          address: string | null
+          cnic: string | null
+          created_at: string
+          current_balance: number
+          email: string | null
+          id: string
+          name: string
+          notes: string | null
+          opening_balance: number
+          phone: string | null
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          cnic?: string | null
+          created_at?: string
+          current_balance?: number
+          email?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          opening_balance?: number
+          phone?: string | null
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          cnic?: string | null
+          created_at?: string
+          current_balance?: number
+          email?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          opening_balance?: number
+          phone?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       customer_purchases: {
         Row: {
           created_at: string
@@ -111,6 +197,51 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      employees: {
+        Row: {
+          cnic: string | null
+          created_at: string
+          email: string | null
+          id: string
+          joining_date: string | null
+          name: string
+          notes: string | null
+          phone: string | null
+          position: string | null
+          salary: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          cnic?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          joining_date?: string | null
+          name: string
+          notes?: string | null
+          phone?: string | null
+          position?: string | null
+          salary?: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          cnic?: string | null
+          created_at?: string
+          email?: string | null
+          id?: string
+          joining_date?: string | null
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          position?: string | null
+          salary?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       expenses: {
         Row: {
@@ -217,6 +348,92 @@ export type Database = {
         }
         Relationships: []
       }
+      merchant_ledger: {
+        Row: {
+          amount: number
+          created_at: string
+          entry_date: string
+          entry_type: string
+          id: string
+          merchant_id: string
+          note: string | null
+          reference: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          entry_date?: string
+          entry_type: string
+          id?: string
+          merchant_id: string
+          note?: string | null
+          reference?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          entry_date?: string
+          entry_type?: string
+          id?: string
+          merchant_id?: string
+          note?: string | null
+          reference?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "merchant_ledger_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      merchants: {
+        Row: {
+          address: string | null
+          cnic: string | null
+          created_at: string
+          current_balance: number
+          email: string | null
+          id: string
+          name: string
+          notes: string | null
+          opening_balance: number
+          phone: string | null
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          cnic?: string | null
+          created_at?: string
+          current_balance?: number
+          email?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          opening_balance?: number
+          phone?: string | null
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          cnic?: string | null
+          created_at?: string
+          current_balance?: number
+          email?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          opening_balance?: number
+          phone?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       products: {
         Row: {
           brand_id: string | null
@@ -317,6 +534,42 @@ export type Database = {
         }
         Relationships: []
       }
+      reports_inbox: {
+        Row: {
+          created_at: string
+          from_email: string | null
+          from_name: string
+          from_phone: string | null
+          id: string
+          message: string
+          status: string
+          subject: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          from_email?: string | null
+          from_name: string
+          from_phone?: string | null
+          id?: string
+          message: string
+          status?: string
+          subject?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          from_email?: string | null
+          from_name?: string
+          from_phone?: string | null
+          id?: string
+          message?: string
+          status?: string
+          subject?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       stock_purchases: {
         Row: {
           created_at: string
@@ -387,6 +640,50 @@ export type Database = {
           },
         ]
       }
+      templates: {
+        Row: {
+          category_id: string | null
+          created_at: string
+          default_price: number
+          description: string | null
+          id: string
+          image_url: string | null
+          name: string
+          notes: string | null
+          updated_at: string
+        }
+        Insert: {
+          category_id?: string | null
+          created_at?: string
+          default_price?: number
+          description?: string | null
+          id?: string
+          image_url?: string | null
+          name: string
+          notes?: string | null
+          updated_at?: string
+        }
+        Update: {
+          category_id?: string | null
+          created_at?: string
+          default_price?: number
+          description?: string | null
+          id?: string
+          image_url?: string | null
+          name?: string
+          notes?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "templates_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       testimonials: {
         Row: {
           avatar_url: string | null
@@ -437,12 +734,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      client_ledger_delta: {
+        Args: { _amount: number; _type: string }
+        Returns: number
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
         Returns: boolean
+      }
+      merchant_ledger_delta: {
+        Args: { _amount: number; _type: string }
+        Returns: number
       }
     }
     Enums: {
