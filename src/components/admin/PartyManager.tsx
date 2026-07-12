@@ -166,7 +166,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
   };
   const del = async (id: string) => {
     if (!confirm("Remove this entry?")) return;
-    await supabase.from(LEDGER_TABLE[kind]).delete().eq("id", id);
+    await (supabase.from(LEDGER_TABLE[kind]) as any).delete().eq("id", id);
     load(); onChanged();
   };
 
