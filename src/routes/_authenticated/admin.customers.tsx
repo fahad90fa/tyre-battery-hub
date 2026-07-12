@@ -17,14 +17,16 @@ export const Route = createFileRoute("/_authenticated/admin/customers")({
 function CustomersAdmin() {
   const [rows, setRows] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
-  const [form, setForm] = useState({ customer_name: "", product_id: "", quantity_purchased: 1, total_price: 0, payment_method: "cash", payment_status: "paid" });
+  const [clients, setClients] = useState<any[]>([]);
+  const [form, setForm] = useState<any>({ customer_name: "", client_id: "", product_id: "", quantity_purchased: 1, total_price: 0, payment_method: "cash", payment_status: "paid" });
 
   const load = async () => {
-    const [{ data: r }, { data: p }] = await Promise.all([
+    const [{ data: r }, { data: p }, { data: c }] = await Promise.all([
       supabase.from("customer_purchases").select("*, products(product_name)").order("purchase_date", { ascending: false }),
       supabase.from("products").select("id, product_name, selling_price, quantity_in_stock"),
+      supabase.from("clients").select("id, name").order("name"),
     ]);
-    setRows(r ?? []); setProducts(p ?? []);
+    setRows(r ?? []); setProducts(p ?? []); setClients(c ?? []);
   };
   useEffect(() => { load(); }, []);
 
@@ -33,11 +35,12 @@ function CustomersAdmin() {
     const prod = products.find((p) => p.id === form.product_id);
     const total = form.total_price || (prod ? prod.selling_price * form.quantity_purchased : 0);
     const { error } = await supabase.from("customer_purchases").insert({
-      ...form, quantity_purchased: Number(form.quantity_purchased), total_price: Number(total),
+      customer_name: form.customer_name, product_id: form.product_id,
+      quantity_purchased: Number(form.quantity_purchased), total_price: Number(total),
+      payment_method: form.payment_method, payment_status: form.payment_status,
     });
     if (error) return toast.error(error.message);
     if (prod) await supabase.from("products").update({ quantity_in_stock: Math.max(0, prod.quantity_in_stock - form.quantity_purchased) }).eq("id", prod.id);
-    // auto-invoice
     const invId = "INV-" + Date.now();
     const { data: inv } = await supabase.from("invoices").insert({
       invoice_id: invId, customer_name: form.customer_name, total_amount: total,
@@ -47,8 +50,21 @@ function CustomersAdmin() {
       invoice_id: inv.id, product_id: form.product_id, product_name: prod?.product_name ?? "",
       quantity: form.quantity_purchased, unit_price: prod?.selling_price ?? total, total_price: total,
     });
+    if (form.client_id) {
+      const type = form.payment_status === "paid" ? "sale" : "sale";
+      await supabase.from("client_ledger").insert({
+        client_id: form.client_id, entry_type: type, amount: total,
+        reference: invId, note: `${prod?.product_name ?? ""} × ${form.quantity_purchased}`,
+      });
+      if (form.payment_status === "paid") {
+        await supabase.from("client_ledger").insert({
+          client_id: form.client_id, entry_type: "payment", amount: total,
+          reference: invId, note: "Paid at sale",
+        });
+      }
+    }
     toast.success("Sale recorded + invoice " + invId);
-    setForm({ customer_name: "", product_id: "", quantity_purchased: 1, total_price: 0, payment_method: "cash", payment_status: "paid" });
+    setForm({ customer_name: "", client_id: "", product_id: "", quantity_purchased: 1, total_price: 0, payment_method: "cash", payment_status: "paid" });
     load();
   };
 
@@ -61,6 +77,15 @@ function CustomersAdmin() {
         <div className="rounded-2xl bg-card p-5 shadow-sm space-y-3">
           <div className="font-semibold">Record sale</div>
           <div className="space-y-1.5"><Label>Customer name</Label><Input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} /></div>
+          <div className="space-y-1.5"><Label>Link client (optional)</Label>
+            <Select value={form.client_id} onValueChange={(v) => {
+              const c = clients.find((x) => x.id === v);
+              setForm({ ...form, client_id: v, customer_name: form.customer_name || (c?.name ?? "") });
+            }}>
+              <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+              <SelectContent>{clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
           <div className="space-y-1.5"><Label>Product</Label>
             <Select value={form.product_id} onValueChange={(v) => {
               const p = products.find((x) => x.id === v);

@@ -16,34 +16,42 @@ export const Route = createFileRoute("/_authenticated/admin/stock")({
 function StockAdmin() {
   const [rows, setRows] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
-  const [form, setForm] = useState({ supplier_name: "", product_id: "", quantity: 1, purchase_price: 0 });
+  const [merchants, setMerchants] = useState<any[]>([]);
+  const [form, setForm] = useState<any>({ supplier_name: "", merchant_id: "", product_id: "", quantity: 1, purchase_price: 0 });
 
   const load = async () => {
-    const [{ data: r }, { data: p }] = await Promise.all([
+    const [{ data: r }, { data: p }, { data: m }] = await Promise.all([
       supabase.from("stock_purchases").select("*, products(product_name)").order("date", { ascending: false }),
       supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price"),
+      supabase.from("merchants").select("id, name").order("name"),
     ]);
-    setRows(r ?? []); setProducts(p ?? []);
+    setRows(r ?? []); setProducts(p ?? []); setMerchants(m ?? []);
   };
   useEffect(() => { load(); }, []);
 
   const add = async () => {
     if (!form.product_id || !form.supplier_name) return toast.error("Fill all fields");
+    const qty = Number(form.quantity), price = Number(form.purchase_price);
     const { error } = await supabase.from("stock_purchases").insert({
-      ...form, quantity: Number(form.quantity), purchase_price: Number(form.purchase_price),
+      supplier_name: form.supplier_name, product_id: form.product_id, quantity: qty, purchase_price: price,
     });
     if (error) return toast.error(error.message);
-    // increment product stock
     const prod = products.find((p) => p.id === form.product_id);
     if (prod) {
       await supabase.from("products").update({
-        quantity_in_stock: prod.quantity_in_stock + Number(form.quantity),
-        purchase_price: Number(form.purchase_price),
+        quantity_in_stock: prod.quantity_in_stock + qty,
+        purchase_price: price,
         last_purchase_date: new Date().toISOString().slice(0, 10),
       }).eq("id", form.product_id);
     }
+    if (form.merchant_id) {
+      await supabase.from("merchant_ledger").insert({
+        merchant_id: form.merchant_id, entry_type: "purchase", amount: qty * price,
+        reference: `Stock: ${prod?.product_name ?? ""}`, note: `Qty ${qty} @ ${price}`,
+      });
+    }
     toast.success("Stock added");
-    setForm({ supplier_name: "", product_id: "", quantity: 1, purchase_price: 0 });
+    setForm({ supplier_name: "", merchant_id: "", product_id: "", quantity: 1, purchase_price: 0 });
     load();
   };
 
@@ -53,6 +61,12 @@ function StockAdmin() {
         <div className="rounded-2xl bg-card p-5 shadow-sm space-y-3">
           <div className="font-semibold">Log purchase from supplier</div>
           <div className="space-y-1.5"><Label>Supplier</Label><Input value={form.supplier_name} onChange={(e) => setForm({ ...form, supplier_name: e.target.value })} /></div>
+          <div className="space-y-1.5"><Label>Link merchant (optional)</Label>
+            <Select value={form.merchant_id} onValueChange={(v) => setForm({ ...form, merchant_id: v })}>
+              <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+              <SelectContent>{merchants.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
           <div className="space-y-1.5"><Label>Product</Label>
             <Select value={form.product_id} onValueChange={(v) => setForm({ ...form, product_id: v })}>
               <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>

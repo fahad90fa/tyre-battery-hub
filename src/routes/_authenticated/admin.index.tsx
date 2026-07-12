@@ -8,7 +8,10 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { Package, DollarSign, TrendingUp, AlertTriangle } from "lucide-react";
+import {
+  Package, DollarSign, TrendingUp, AlertTriangle, LayoutTemplate,
+  Store, UserCircle, Briefcase, Layers,
+} from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/admin/")({
   component: Dashboard,
@@ -28,7 +31,10 @@ function CountUp({ n, prefix = "" }: { n: number; prefix?: string }) {
 }
 
 function Dashboard() {
-  const [stats, setStats] = useState({ stockValue: 0, todaySales: 0, expenses: 0, profit: 0, outOfStock: 0 });
+  const [stats, setStats] = useState({
+    stockValue: 0, todaySales: 0, expenses: 0, profit: 0, outOfStock: 0,
+    templates: 0, products: 0, stockUnits: 0, employees: 0, merchants: 0, clients: 0,
+  });
   const [stockByCat, setStockByCat] = useState<any[]>([]);
   const [salesTrend, setSalesTrend] = useState<any[]>([]);
   const [topSold, setTopSold] = useState<any[]>([]);
@@ -36,21 +42,38 @@ function Dashboard() {
   useEffect(() => {
     (async () => {
       const today = new Date().toISOString().slice(0, 10);
-      const [{ data: products }, { data: sales }, { data: expenses }, { data: cats }] = await Promise.all([
+      const [
+        { data: products },
+        { data: sales },
+        { data: expenses },
+        { data: cats },
+        { count: tplCount },
+        { count: empCount },
+        { count: merCount },
+        { count: cliCount },
+      ] = await Promise.all([
         supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price, selling_price, category_id"),
         supabase.from("customer_purchases").select("total_price, purchase_date, product_id, quantity_purchased"),
         supabase.from("expenses").select("amount, date_of_expense"),
         supabase.from("categories").select("id, name"),
+        supabase.from("templates").select("*", { count: "exact", head: true }),
+        supabase.from("employees").select("*", { count: "exact", head: true }),
+        supabase.from("merchants").select("*", { count: "exact", head: true }),
+        supabase.from("clients").select("*", { count: "exact", head: true }),
       ]);
       const p = products ?? [], s = sales ?? [], e = expenses ?? [], c = cats ?? [];
       const stockValue = p.reduce((a, x) => a + Number(x.purchase_price) * x.quantity_in_stock, 0);
+      const stockUnits = p.reduce((a, x) => a + x.quantity_in_stock, 0);
       const todaySales = s.filter((x) => x.purchase_date === today).reduce((a, x) => a + Number(x.total_price), 0);
       const totalExp = e.reduce((a, x) => a + Number(x.amount), 0);
       const totalRev = s.reduce((a, x) => a + Number(x.total_price), 0);
       const outOfStock = p.filter((x) => x.quantity_in_stock <= 0).length;
-      setStats({ stockValue, todaySales, expenses: totalExp, profit: totalRev - totalExp, outOfStock });
+      setStats({
+        stockValue, todaySales, expenses: totalExp, profit: totalRev - totalExp, outOfStock,
+        templates: tplCount ?? 0, products: p.length, stockUnits,
+        employees: empCount ?? 0, merchants: merCount ?? 0, clients: cliCount ?? 0,
+      });
 
-      const catMap = Object.fromEntries(c.map((x) => [x.id, x.name]));
       setStockByCat(c.map((cat) => ({
         name: cat.name,
         stock: p.filter((x) => x.category_id === cat.id).reduce((a, x) => a + x.quantity_in_stock, 0),
@@ -67,7 +90,16 @@ function Dashboard() {
     })();
   }, []);
 
-  const cards = [
+  const counts = [
+    { label: "Templates", value: stats.templates, icon: LayoutTemplate, color: "text-primary" },
+    { label: "Products", value: stats.products, icon: Package, color: "text-primary" },
+    { label: "Stock units", value: stats.stockUnits, icon: Layers, color: "text-primary" },
+    { label: "Employees", value: stats.employees, icon: Briefcase, color: "text-orange-500" },
+    { label: "Merchants", value: stats.merchants, icon: Store, color: "text-orange-500" },
+    { label: "Clients", value: stats.clients, icon: UserCircle, color: "text-orange-500" },
+  ];
+
+  const money_cards = [
     { label: "Total Stock Value", value: stats.stockValue, icon: Package, color: "text-primary" },
     { label: "Today's Sales", value: stats.todaySales, icon: DollarSign, color: "text-green-600" },
     { label: "Total Expenses", value: stats.expenses, icon: TrendingUp, color: "text-orange-500" },
@@ -76,9 +108,22 @@ function Dashboard() {
 
   return (
     <AdminShell title="Dashboard">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {cards.map((c, i) => (
-          <motion.div key={c.label} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {counts.map((c, i) => (
+          <motion.div key={c.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
+                      className="rounded-2xl bg-card p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] uppercase text-muted-foreground tracking-wider">{c.label}</div>
+              <c.icon className={`h-4 w-4 ${c.color}`} />
+            </div>
+            <div className={`text-2xl font-black mt-1 ${c.color}`}><CountUp n={c.value} /></div>
+          </motion.div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+        {money_cards.map((c, i) => (
+          <motion.div key={c.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
                       className="rounded-2xl bg-card p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="text-xs uppercase text-muted-foreground tracking-wider">{c.label}</div>
