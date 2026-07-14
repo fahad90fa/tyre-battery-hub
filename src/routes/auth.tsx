@@ -229,10 +229,9 @@ function AuthPage() {
               </TabsList>
 
               <AnimatePresence mode="wait">
-                <TabsContent value="signin" className="mt-6" forceMount>
-                  {tab === "signin" && (
+                {tab === "signin" ? (
+                  <TabsContent key="signin" value="signin" className="mt-6">
                     <motion.div
-                      key="signin"
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 20 }}
@@ -251,13 +250,10 @@ function AuthPage() {
                         </Button>
                       </motion.div>
                     </motion.div>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="signup" className="mt-6" forceMount>
-                  {tab === "signup" && (
+                  </TabsContent>
+                ) : (
+                  <TabsContent key="signup" value="signup" className="mt-6">
                     <motion.div
-                      key="signup"
                       initial={{ opacity: 0, x: 20 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -20 }}
@@ -279,8 +275,8 @@ function AuthPage() {
                         </Button>
                       </motion.div>
                     </motion.div>
-                  )}
-                </TabsContent>
+                  </TabsContent>
+                )}
               </AnimatePresence>
             </Tabs>
 
