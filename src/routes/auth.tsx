@@ -32,33 +32,43 @@ function AuthPage() {
 
   const signIn = async () => {
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
-    if (error) return toast.error(error.message);
-    toast.success("Welcome back!");
-    navigate({ to: "/" });
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) return toast.error(error.message);
+      toast.success("Welcome back!");
+      navigate({ to: "/" });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not reach the server. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const signUp = async () => {
     setLoading(true);
-    const { data, error } = await supabase.auth.signUp({
-      email, password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/`,
-        data: { full_name: name },
-      },
-    });
-    setLoading(false);
-    if (error) return toast.error(error.message);
-    if (data.user) {
-      await supabase.from("profiles").upsert({ id: data.user.id, email, full_name: name });
-      await supabase.from("user_roles").insert({ user_id: data.user.id, role: "customer" });
-    }
-    if (data.session) {
-      toast.success("Account created!");
-      navigate({ to: "/" });
-    } else {
-      toast.success("Check your email to confirm.");
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email, password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/`,
+          data: { full_name: name },
+        },
+      });
+      if (error) return toast.error(error.message);
+      if (data.user) {
+        await supabase.from("profiles").upsert({ id: data.user.id, email, full_name: name });
+        await supabase.from("user_roles").insert({ user_id: data.user.id, role: "customer" });
+      }
+      if (data.session) {
+        toast.success("Account created!");
+        navigate({ to: "/" });
+      } else {
+        toast.success("Check your email to confirm.");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not reach the server. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
