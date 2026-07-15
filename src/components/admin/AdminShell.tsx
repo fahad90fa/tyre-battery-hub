@@ -17,9 +17,11 @@ const GROUPS: { label: string; links: { to: string; label: string; icon: any; ex
     { to: "/admin/templates", label: "Templates", icon: LayoutTemplate },
     { to: "/admin/stock", label: "Stock Purchases", icon: Truck },
   ]},
+  { label: "Accounts", links: [
+    { to: "/admin/clients", label: "Customer Accounts", icon: UserCircle },
+    { to: "/admin/merchants", label: "Merchant Accounts", icon: Store },
+  ]},
   { label: "People", links: [
-    { to: "/admin/merchants", label: "Merchants", icon: Store },
-    { to: "/admin/clients", label: "Clients", icon: UserCircle },
     { to: "/admin/employees", label: "Employees", icon: Briefcase },
     { to: "/admin/users", label: "Users", icon: Users },
   ]},

@@ -70,6 +70,7 @@ export type Database = {
           entry_date: string
           entry_type: string
           id: string
+          method: string | null
           note: string | null
           reference: string | null
           updated_at: string
@@ -81,6 +82,7 @@ export type Database = {
           entry_date?: string
           entry_type: string
           id?: string
+          method?: string | null
           note?: string | null
           reference?: string | null
           updated_at?: string
@@ -92,6 +94,7 @@ export type Database = {
           entry_date?: string
           entry_type?: string
           id?: string
+          method?: string | null
           note?: string | null
           reference?: string | null
           updated_at?: string
@@ -150,6 +153,7 @@ export type Database = {
       }
       customer_purchases: {
         Row: {
+          cost_price: number | null
           created_at: string
           customer_id: string | null
           customer_name: string
@@ -163,6 +167,7 @@ export type Database = {
           total_price: number
         }
         Insert: {
+          cost_price?: number | null
           created_at?: string
           customer_id?: string | null
           customer_name: string
@@ -176,6 +181,7 @@ export type Database = {
           total_price: number
         }
         Update: {
+          cost_price?: number | null
           created_at?: string
           customer_id?: string | null
           customer_name?: string
@@ -272,6 +278,7 @@ export type Database = {
       }
       invoice_items: {
         Row: {
+          cost_price: number | null
           id: string
           invoice_id: string
           product_id: string | null
@@ -281,6 +288,7 @@ export type Database = {
           unit_price: number
         }
         Insert: {
+          cost_price?: number | null
           id?: string
           invoice_id: string
           product_id?: string | null
@@ -290,6 +298,7 @@ export type Database = {
           unit_price: number
         }
         Update: {
+          cost_price?: number | null
           id?: string
           invoice_id?: string
           product_id?: string | null
@@ -317,9 +326,11 @@ export type Database = {
       }
       invoices: {
         Row: {
+          client_id: string | null
           created_at: string
           customer_id: string | null
           customer_name: string
+          due_date: string | null
           id: string
           invoice_id: string
           payment_method: string
@@ -327,9 +338,11 @@ export type Database = {
           total_amount: number
         }
         Insert: {
+          client_id?: string | null
           created_at?: string
           customer_id?: string | null
           customer_name: string
+          due_date?: string | null
           id?: string
           invoice_id: string
           payment_method: string
@@ -337,16 +350,64 @@ export type Database = {
           total_amount: number
         }
         Update: {
+          client_id?: string | null
           created_at?: string
           customer_id?: string | null
           customer_name?: string
+          due_date?: string | null
           id?: string
           invoice_id?: string
           payment_method?: string
           payment_status?: string
           total_amount?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "invoices_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoice_payments: {
+        Row: {
+          amount: number
+          created_at: string
+          id: string
+          invoice_id: string
+          method: string
+          note: string | null
+          payment_date: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          id?: string
+          invoice_id: string
+          method?: string
+          note?: string | null
+          payment_date?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          id?: string
+          invoice_id?: string
+          method?: string
+          note?: string | null
+          payment_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_payments_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       merchant_ledger: {
         Row: {
@@ -356,6 +417,7 @@ export type Database = {
           entry_type: string
           id: string
           merchant_id: string
+          method: string | null
           note: string | null
           reference: string | null
           updated_at: string
@@ -367,6 +429,7 @@ export type Database = {
           entry_type: string
           id?: string
           merchant_id: string
+          method?: string | null
           note?: string | null
           reference?: string | null
           updated_at?: string
@@ -378,6 +441,7 @@ export type Database = {
           entry_type?: string
           id?: string
           merchant_id?: string
+          method?: string | null
           note?: string | null
           reference?: string | null
           updated_at?: string

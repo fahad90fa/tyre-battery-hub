@@ -117,7 +117,9 @@ create table public.invoices (
   created_at timestamptz not null default now(),
   customer_id uuid,
   invoice_id text,
-  customer_name text
+  customer_name text,
+  client_id uuid,
+  due_date date
 );
 
 create table public.invoice_items (
@@ -127,7 +129,18 @@ create table public.invoice_items (
   quantity integer,
   product_id uuid,
   invoice_id uuid,
-  id uuid primary key default gen_random_uuid()
+  id uuid primary key default gen_random_uuid(),
+  cost_price numeric
+);
+
+create table public.invoice_payments (
+  id uuid primary key default gen_random_uuid(),
+  invoice_id uuid not null references public.invoices(id) on delete cascade,
+  amount numeric not null,
+  method text not null default 'cash',
+  payment_date date not null default current_date,
+  note text,
+  created_at timestamptz not null default now()
 );
 
 create table public.customer_purchases (
@@ -141,7 +154,8 @@ create table public.customer_purchases (
   payment_status text,
   payment_method text,
   customer_name text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  cost_price numeric
 );
 
 create table public.clients (
@@ -181,7 +195,8 @@ create table public.client_ledger (
   note text,
   reference text,
   client_id uuid,
-  amount numeric
+  amount numeric,
+  method text
 );
 
 create table public.merchant_ledger (
@@ -193,7 +208,8 @@ create table public.merchant_ledger (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   note text,
-  entry_type text
+  entry_type text,
+  method text
 );
 
 create table public.employees (

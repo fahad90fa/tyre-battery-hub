@@ -4,8 +4,8 @@ import { PartyManager } from "@/components/admin/PartyManager";
 
 export const Route = createFileRoute("/_authenticated/admin/clients")({
   component: () => (
-    <AdminShell title="Clients">
-      <PartyManager kind="clients" title="Clients" />
+    <AdminShell title="Customer Accounts (Udhar)">
+      <PartyManager kind="clients" title="Customers" />
     </AdminShell>
   ),
 });
