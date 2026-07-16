@@ -1,0 +1,27 @@
+{
+  "name": "reentrancy-attack-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Interactive Reentrancy Attack Demo — vulnerable vs. secure smart contracts on a local Hardhat chain, driven from a React dashboard.",
+  "scripts": {
+    "chain": "hardhat node",
+    "compile": "hardhat compile",
+    "export": "hardhat run scripts/export-abis.js",
+    "build:contracts": "hardhat compile && hardhat run scripts/export-abis.js",
+    "test": "hardhat test",
+    "deploy": "hardhat run scripts/deploy.js --network localhost",
+    "postinstall": "echo 'Backend deps installed. Next: npm run build:contracts'"
+  },
+  "keywords": [
+    "solidity",
+    "reentrancy",
+    "hardhat",
+    "security",
+    "education"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.10"
+  }
+}
