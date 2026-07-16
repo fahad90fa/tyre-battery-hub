@@ -6,7 +6,7 @@ import { money, shortDate } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/admin/stock")({
@@ -23,14 +23,16 @@ function StockAdmin() {
     const [{ data: r }, { data: p }, { data: m }] = await Promise.all([
       supabase.from("stock_purchases").select("*, products(product_name)").order("date", { ascending: false }),
       supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price"),
-      supabase.from("merchants").select("id, name").order("name"),
+      supabase.from("merchants").select("id, name, account_no").order("name"),
     ]);
     setRows(r ?? []); setProducts(p ?? []); setMerchants(m ?? []);
   };
   useEffect(() => { load(); }, []);
 
   const add = async () => {
-    if (!form.product_id || !form.supplier_name) return toast.error("Fill all fields");
+    if (!form.merchant_id) return toast.error("Select the merchant this stock was purchased from");
+    if (!form.product_id) return toast.error("Select a product");
+    if (!form.supplier_name) return toast.error("Supplier name required");
     const qty = Number(form.quantity), price = Number(form.purchase_price);
     const { error } = await supabase.from("stock_purchases").insert({
       supplier_name: form.supplier_name, product_id: form.product_id, quantity: qty, purchase_price: price,
@@ -60,18 +62,27 @@ function StockAdmin() {
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="rounded-2xl bg-card p-5 shadow-sm space-y-3">
           <div className="font-semibold">Log purchase from supplier</div>
-          <div className="space-y-1.5"><Label>Supplier</Label><Input value={form.supplier_name} onChange={(e) => setForm({ ...form, supplier_name: e.target.value })} /></div>
-          <div className="space-y-1.5"><Label>Link merchant (optional)</Label>
-            <Select value={form.merchant_id} onValueChange={(v) => setForm({ ...form, merchant_id: v })}>
-              <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-              <SelectContent>{merchants.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
-            </Select>
+          <div className="space-y-1.5"><Label>Merchant <span className="text-destructive">*</span></Label>
+            <SearchableSelect
+              options={merchants.map((m) => ({ value: m.id, label: m.name, hint: m.account_no ?? undefined }))}
+              value={form.merchant_id}
+              onValueChange={(v) => {
+                const m = merchants.find((x) => x.id === v);
+                setForm({ ...form, merchant_id: v, supplier_name: form.supplier_name || (m?.name ?? "") });
+              }}
+              placeholder="Select merchant"
+              searchPlaceholder="Search merchant by name or ID..."
+            />
           </div>
+          <div className="space-y-1.5"><Label>Supplier</Label><Input value={form.supplier_name} onChange={(e) => setForm({ ...form, supplier_name: e.target.value })} /></div>
           <div className="space-y-1.5"><Label>Product</Label>
-            <Select value={form.product_id} onValueChange={(v) => setForm({ ...form, product_id: v })}>
-              <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
-              <SelectContent>{products.map((p) => <SelectItem key={p.id} value={p.id}>{p.product_name}</SelectItem>)}</SelectContent>
-            </Select>
+            <SearchableSelect
+              options={products.map((p) => ({ value: p.id, label: p.product_name }))}
+              value={form.product_id}
+              onValueChange={(v) => setForm({ ...form, product_id: v })}
+              placeholder="Select product"
+              searchPlaceholder="Search product..."
+            />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1.5"><Label>Qty</Label><Input type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })} /></div>

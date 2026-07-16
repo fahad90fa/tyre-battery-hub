@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -143,26 +144,35 @@ function CustomersAdmin() {
           <div className="font-semibold">Record sale</div>
           <div className="space-y-1.5"><Label>Customer name</Label><Input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} /></div>
           <div className="space-y-1.5"><Label>Customer account {remaining > 0 && <span className="text-destructive">*</span>}</Label>
-            <Select value={form.client_id} onValueChange={(v) => {
-              const c = clients.find((x) => x.id === v);
-              setForm({ ...form, client_id: v, customer_name: form.customer_name || (c?.name ?? "") });
-            }}>
-              <SelectTrigger><SelectValue placeholder="— (required for udhar)" /></SelectTrigger>
-              <SelectContent>{clients.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.account_no ? `${c.account_no} · ` : ""}{c.name}{Number(c.current_balance) > 0 ? ` — owes ${money(c.current_balance)}` : ""}
-                </SelectItem>
-              ))}</SelectContent>
-            </Select>
+            <SearchableSelect
+              options={clients.map((c) => ({
+                value: c.id,
+                label: `${c.account_no ? `${c.account_no} · ` : ""}${c.name}`,
+                hint: Number(c.current_balance) > 0 ? `owes ${money(c.current_balance)}` : undefined,
+              }))}
+              value={form.client_id}
+              onValueChange={(v) => {
+                const c = clients.find((x) => x.id === v);
+                setForm({ ...form, client_id: v, customer_name: form.customer_name || (c?.name ?? "") });
+              }}
+              placeholder="— (required for udhar)"
+              searchPlaceholder="Search by ID, name..."
+            />
           </div>
           <div className="space-y-1.5"><Label>Product</Label>
-            <Select value={form.product_id} onValueChange={(v) => {
-              const p = products.find((x) => x.id === v);
-              setForm({ ...form, product_id: v, total_price: p ? p.selling_price * form.quantity_purchased : 0 });
-            }}>
-              <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
-              <SelectContent>{products.map((p) => <SelectItem key={p.id} value={p.id}>{p.product_name}</SelectItem>)}</SelectContent>
-            </Select>
+            <SearchableSelect
+              options={products.map((p) => ({
+                value: p.id, label: p.product_name,
+                hint: `${money(p.selling_price)} · ${p.quantity_in_stock} in stock`,
+              }))}
+              value={form.product_id}
+              onValueChange={(v) => {
+                const p = products.find((x) => x.id === v);
+                setForm({ ...form, product_id: v, total_price: p ? p.selling_price * form.quantity_purchased : 0 });
+              }}
+              placeholder="Select product"
+              searchPlaceholder="Search product..."
+            />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1.5"><Label>Qty</Label><Input type="number" value={form.quantity_purchased} onChange={(e) => {

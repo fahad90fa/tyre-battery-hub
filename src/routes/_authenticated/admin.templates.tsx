@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Copy, Search } from "lucide-react";
 import { ImageUpload } from "@/components/admin/ImageUpload";
@@ -79,10 +79,12 @@ function TemplatesAdmin() {
             <div className="grid grid-cols-2 gap-3">
               <Field label="Name" full><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
               <Field label="Category">
-                <Select value={form.category_id} onValueChange={(v) => setForm({ ...form, category_id: v })}>
-                  <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-                  <SelectContent>{cats.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={cats.map((c) => ({ value: c.id, label: c.name }))}
+                  value={form.category_id}
+                  onValueChange={(v) => setForm({ ...form, category_id: v })}
+                  placeholder="—" searchPlaceholder="Search category..."
+                />
               </Field>
               <Field label="Default price"><Input type="number" value={form.default_price} onChange={(e) => setForm({ ...form, default_price: e.target.value })} /></Field>
               <Field label="Image" full><ImageUpload value={form.image_url} onChange={(url) => setForm({ ...form, image_url: url })} /></Field>
