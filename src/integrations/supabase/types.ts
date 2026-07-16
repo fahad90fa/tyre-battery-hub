@@ -111,6 +111,7 @@ export type Database = {
       }
       clients: {
         Row: {
+          account_no: string | null
           address: string | null
           cnic: string | null
           created_at: string
@@ -124,6 +125,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          account_no?: string | null
           address?: string | null
           cnic?: string | null
           created_at?: string
@@ -137,6 +139,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          account_no?: string | null
           address?: string | null
           cnic?: string | null
           created_at?: string
@@ -458,6 +461,7 @@ export type Database = {
       }
       merchants: {
         Row: {
+          account_no: string | null
           address: string | null
           cnic: string | null
           created_at: string
@@ -471,6 +475,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          account_no?: string | null
           address?: string | null
           cnic?: string | null
           created_at?: string
@@ -484,6 +489,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          account_no?: string | null
           address?: string | null
           cnic?: string | null
           created_at?: string
