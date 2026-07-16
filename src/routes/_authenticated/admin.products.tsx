@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2 } from "lucide-react";
@@ -84,22 +84,28 @@ function ProductsAdmin() {
             <div className="grid grid-cols-2 gap-3">
               <Field label="Product name" full><Input value={form.product_name} onChange={(e) => setForm({ ...form, product_name: e.target.value })} /></Field>
               <Field label="Category">
-                <Select value={form.category_id} onValueChange={(v) => setForm({ ...form, category_id: v, subcategory_id: "" })}>
-                  <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-                  <SelectContent>{cats.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={cats.map((c) => ({ value: c.id, label: c.name }))}
+                  value={form.category_id}
+                  onValueChange={(v) => setForm({ ...form, category_id: v, subcategory_id: "" })}
+                  placeholder="—" searchPlaceholder="Search category..."
+                />
               </Field>
               <Field label="Subcategory">
-                <Select value={form.subcategory_id} onValueChange={(v) => setForm({ ...form, subcategory_id: v })}>
-                  <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-                  <SelectContent>{subs.filter((s) => s.category_id === form.category_id).map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={subs.filter((s) => s.category_id === form.category_id).map((s) => ({ value: s.id, label: s.name }))}
+                  value={form.subcategory_id}
+                  onValueChange={(v) => setForm({ ...form, subcategory_id: v })}
+                  placeholder="—" searchPlaceholder="Search subcategory..."
+                />
               </Field>
               <Field label="Brand">
-                <Select value={form.brand_id} onValueChange={(v) => setForm({ ...form, brand_id: v })}>
-                  <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-                  <SelectContent>{brands.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={brands.map((b) => ({ value: b.id, label: b.name }))}
+                  value={form.brand_id}
+                  onValueChange={(v) => setForm({ ...form, brand_id: v })}
+                  placeholder="—" searchPlaceholder="Search brand..."
+                />
               </Field>
               <Field label="Product image" full><ImageUpload value={form.image_url} onChange={(url) => setForm({ ...form, image_url: url })} /></Field>
               <Field label="Purchase price"><Input type="number" value={form.purchase_price} onChange={(e) => setForm({ ...form, purchase_price: e.target.value })} /></Field>
