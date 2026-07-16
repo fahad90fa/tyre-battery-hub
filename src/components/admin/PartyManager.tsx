@@ -115,7 +115,7 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
           </DialogTrigger>
           <DialogContent className="max-w-xl">
             <DialogHeader><DialogTitle>{editing ? "Edit" : "Add"} {title.slice(0, -1).toLowerCase()}</DialogTitle></DialogHeader>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Name" full><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
               <Field label="Phone"><Input value={form.phone ?? ""} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></Field>
               <Field label="Email"><Input value={form.email ?? ""} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
@@ -129,8 +129,8 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
         </Dialog>
       </div>
 
-      <div className="rounded-2xl bg-card shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="rounded-2xl bg-card shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
             <tr>
               <th className="p-3">Name</th><th className="p-3">Phone</th><th className="p-3">Email</th>
@@ -301,8 +301,8 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
           <Printer className="h-4 w-4 mr-2" /> Print ledger
         </Button>
       </div>
-      <div className="rounded-xl border overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="rounded-xl border overflow-x-auto">
+        <table className="w-full min-w-[560px] text-sm">
           <thead className="bg-muted text-xs uppercase text-muted-foreground text-left">
             <tr><th className="p-2">Date</th><th className="p-2">Type</th><th className="p-2">Method</th><th className="p-2">Amount</th><th className="p-2">Balance</th><th className="p-2">Ref</th><th className="p-2"></th></tr>
           </thead>
@@ -346,7 +346,7 @@ function Kpi({ icon: Icon, label, value, accent }: { icon: any; label: string; v
 
 function Field({ label, children, full }: { label: string; children: React.ReactNode; full?: boolean }) {
   return (
-    <div className={`space-y-1.5 ${full ? "col-span-2" : ""}`}>
+    <div className={`space-y-1.5 ${full ? "sm:col-span-2" : ""}`}>
       <Label>{label}</Label>
       {children}
     </div>

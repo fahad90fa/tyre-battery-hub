@@ -26,8 +26,8 @@ function UsersAdmin() {
 
   return (
     <AdminShell title="Users">
-      <div className="rounded-2xl bg-card shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="rounded-2xl bg-card shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
             <tr><th className="p-3">Name</th><th className="p-3">Email</th><th className="p-3">Roles</th><th className="p-3">Joined</th></tr>
           </thead>

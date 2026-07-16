@@ -39,7 +39,7 @@ export function Hero() {
             "radial-gradient(circle at 30% 50%, rgba(245,158,11,0.15), transparent 60%), radial-gradient(circle at 70% 50%, rgba(37,99,235,0.15), transparent 60%)",
         }}
       />
-      <div className="relative grid md:grid-cols-2 gap-6 items-center min-h-[440px] px-8 py-10">
+      <div className="relative grid md:grid-cols-2 gap-6 items-center min-h-[440px] px-5 sm:px-8 py-10">
         <div className="relative order-2 md:order-1 h-[320px] md:h-[420px]">
           <motion.img
             key={i + "img"}
@@ -77,7 +77,7 @@ export function Hero() {
           </AnimatePresence>
 
           {/* Long Life badge */}
-          <div className="absolute -top-4 right-0 md:-right-4 h-20 w-20 rounded-full bg-gold text-[#0B1120] font-bold text-xs grid place-items-center rotate-12 shadow-xl"
+          <div className="absolute -top-4 right-0 md:-right-4 h-20 w-20 rounded-full bg-gold text-[#0B1120] font-bold text-xs hidden md:grid place-items-center rotate-12 shadow-xl"
                style={{ clipPath: "polygon(50% 0%, 60% 8%, 71% 3%, 76% 14%, 88% 14%, 88% 26%, 98% 32%, 92% 43%, 100% 53%, 91% 62%, 96% 74%, 84% 78%, 82% 90%, 71% 87%, 63% 97%, 52% 90%, 41% 100%, 34% 88%, 22% 91%, 20% 79%, 8% 76%, 12% 64%, 2% 56%, 9% 45%, 1% 34%, 12% 29%, 12% 17%, 24% 17%, 29% 6%, 40% 11%)" }}>
             <div className="text-center leading-tight">
               <div>Long</div>

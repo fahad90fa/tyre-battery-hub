@@ -48,8 +48,8 @@ function ExpensesAdmin() {
           </div>
         </div>
 
-        <div className="lg:col-span-2 rounded-2xl bg-card shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="lg:col-span-2 rounded-2xl bg-card shadow-sm overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
               <tr><th className="p-3">Date</th><th className="p-3">Type</th><th className="p-3">Amount</th><th className="p-3">Notes</th><th></th></tr>
             </thead>

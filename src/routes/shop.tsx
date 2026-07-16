@@ -59,19 +59,19 @@ function Shop() {
         <p className="text-muted-foreground text-sm mt-1">Browse our full catalog.</p>
 
         <div className="mt-6 flex flex-wrap gap-3 items-center">
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative w-full sm:flex-1 sm:min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input className="pl-9" placeholder="Search products..." value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <Select value={cat} onValueChange={setCat}>
-            <SelectTrigger className="w-[200px]"><SelectValue placeholder="Category" /></SelectTrigger>
+            <SelectTrigger className="flex-1 sm:flex-none sm:w-[200px]"><SelectValue placeholder="Category" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All categories</SelectItem>
               {cats.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={brand} onValueChange={setBrand}>
-            <SelectTrigger className="w-[180px]"><SelectValue placeholder="Brand" /></SelectTrigger>
+            <SelectTrigger className="flex-1 sm:flex-none sm:w-[180px]"><SelectValue placeholder="Brand" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All brands</SelectItem>
               {brands.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}

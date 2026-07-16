@@ -111,8 +111,8 @@ function InvoicesAdmin() {
         </div>
       </div>
 
-      <div className="rounded-2xl bg-card shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="rounded-2xl bg-card shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
             <tr><th className="p-3">Invoice</th><th className="p-3">Date</th><th className="p-3">Customer</th><th className="p-3">Amount</th><th className="p-3">Paid</th><th className="p-3">Balance</th><th className="p-3">Method</th><th className="p-3">Status</th><th></th></tr>
           </thead>
