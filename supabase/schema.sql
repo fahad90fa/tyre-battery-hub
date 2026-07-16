@@ -159,6 +159,7 @@ create table public.customer_purchases (
 );
 
 create table public.clients (
+  account_no text unique,
   cnic text,
   notes text,
   name text,
@@ -173,6 +174,7 @@ create table public.clients (
 );
 
 create table public.merchants (
+  account_no text unique,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   id uuid primary key default gen_random_uuid(),

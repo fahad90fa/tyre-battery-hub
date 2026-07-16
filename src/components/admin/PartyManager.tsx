@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel } from "@/lib/payments";
+import { InvoiceQuickView } from "@/components/admin/InvoiceQuickView";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -87,7 +88,9 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
   };
   const edit = (r: any) => { setEditing(r.id); setForm({ ...empty, ...r }); setOpen(true); };
 
-  const filtered = rows.filter((r) => !q || (r.name + " " + (r.phone ?? "") + " " + (r.email ?? "")).toLowerCase().includes(q.toLowerCase()));
+  const filtered = rows.filter((r) => !q ||
+    [r.account_no, r.name, r.phone, r.email, r.cnic, r.address]
+      .filter(Boolean).join(" ").toLowerCase().includes(q.toLowerCase()));
 
   const outstanding = rows.reduce((a, r) => a + Math.max(0, Number(r.current_balance)), 0);
   const withBalance = rows.filter((r) => Number(r.current_balance) > 0).length;
@@ -105,7 +108,7 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
       <div className="flex items-center justify-between mb-4 gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder={`Search ${title.toLowerCase()}...`} value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
+          <Input placeholder={`Search by ID, name, phone, address...`} value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
@@ -133,13 +136,14 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
         <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
             <tr>
-              <th className="p-3">Name</th><th className="p-3">Phone</th><th className="p-3">Email</th>
-              <th className="p-3">Balance</th><th className="p-3">Added</th><th className="p-3"></th>
+              <th className="p-3">ID</th><th className="p-3">Name</th><th className="p-3">Phone</th>
+              <th className="p-3">Address</th><th className="p-3">Balance</th><th className="p-3">Added</th><th className="p-3"></th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((r) => (
-              <tr key={r.id} className="border-t">
+              <tr key={r.id} className="border-t hover:bg-muted/40 cursor-pointer" onClick={() => setLedgerFor(r)}>
+                <td className="p-3 font-mono text-xs font-semibold text-primary whitespace-nowrap">{r.account_no ?? "—"}</td>
                 <td className="p-3 font-medium">
                   {r.name}
                   {overdueByParty[r.id] > 0 && (
@@ -149,17 +153,17 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
                   )}
                 </td>
                 <td className="p-3 text-muted-foreground">{r.phone ?? "—"}</td>
-                <td className="p-3 text-muted-foreground">{r.email ?? "—"}</td>
+                <td className="p-3 text-muted-foreground max-w-[180px] truncate">{r.address ?? "—"}</td>
                 <td className={`p-3 font-semibold ${Number(r.current_balance) > 0 ? "text-orange-500" : "text-green-600"}`}>{money(r.current_balance)}</td>
                 <td className="p-3">{shortDate(r.created_at)}</td>
-                <td className="p-3 text-right whitespace-nowrap">
+                <td className="p-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                   <Button variant="ghost" size="icon" title="Ledger" onClick={() => setLedgerFor(r)}><BookOpen className="h-4 w-4" /></Button>
                   <Button variant="ghost" size="icon" onClick={() => edit(r)}><Pencil className="h-4 w-4" /></Button>
                   <Button variant="ghost" size="icon" onClick={() => remove(r.id)}><Trash2 className="h-4 w-4" /></Button>
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={6} className="p-10 text-center text-muted-foreground">Nothing here yet.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={7} className="p-10 text-center text-muted-foreground">Nothing here yet.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -169,7 +173,17 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
           {ledgerFor && (
             <>
               <SheetHeader>
-                <SheetTitle>Ledger — {ledgerFor.name}</SheetTitle>
+                <SheetTitle>
+                  Ledger — {ledgerFor.name}
+                  {ledgerFor.account_no && (
+                    <span className="ml-2 font-mono text-xs font-semibold text-primary align-middle">{ledgerFor.account_no}</span>
+                  )}
+                </SheetTitle>
+                {(ledgerFor.phone || ledgerFor.address) && (
+                  <div className="text-xs text-muted-foreground">
+                    {[ledgerFor.phone, ledgerFor.address].filter(Boolean).join(" · ")}
+                  </div>
+                )}
               </SheetHeader>
               <LedgerView party={ledgerFor} kind={kind} onChanged={load} />
             </>
@@ -185,6 +199,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
   const [form, setForm] = useState({ entry_type: TYPES[kind][0].value, amount: 0, method: "cash", reference: "", note: "" });
   const [current, setCurrent] = useState<number>(party.current_balance);
   const [overdueInvoices, setOverdueInvoices] = useState<any[]>([]);
+  const [viewInvoice, setViewInvoice] = useState<string | null>(null);
 
   const load = async () => {
     const { data: e } = await (supabase.from(LEDGER_TABLE[kind]) as any)
@@ -260,14 +275,17 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3">
           <div className="text-xs font-semibold text-destructive mb-2">Pending invoices</div>
           {overdueInvoices.map((i) => (
-            <div key={i.id} className="flex justify-between text-xs py-1 border-b last:border-0">
-              <span className="font-mono">{i.invoice_id}</span>
+            <button key={i.id} onClick={() => setViewInvoice(i.invoice_id)}
+                    className="w-full flex justify-between items-center text-xs py-1.5 border-b last:border-0 hover:bg-destructive/10 rounded px-1 -mx-1 text-left">
+              <span className="font-mono underline decoration-dotted">{i.invoice_id}</span>
+              <span className="text-muted-foreground">{shortDate(i.created_at)}</span>
               <span>{money(i.total_amount)}</span>
               <span className={i.due_date && i.due_date < today ? "text-destructive font-semibold" : "text-muted-foreground"}>
                 {i.due_date ? (i.due_date < today ? `overdue ${shortDate(i.due_date)}` : `due ${shortDate(i.due_date)}`) : "no due date"}
               </span>
-            </div>
+            </button>
           ))}
+          <div className="text-[10px] text-muted-foreground mt-1">Tap an invoice to see its full details.</div>
         </div>
       )}
 
@@ -309,18 +327,28 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
           <tbody>
             {entries.map((e) => {
               const up = INCREASES[kind].includes(e.entry_type);
+              const hasInvoice = kind === "clients" && typeof e.reference === "string" && e.reference.startsWith("INV");
               return (
-                <tr key={e.id} className="border-t">
-                  <td className="p-2">{shortDate(e.entry_date)}</td>
+                <tr key={e.id}
+                    className={`border-t ${hasInvoice ? "cursor-pointer hover:bg-muted/50" : ""}`}
+                    onClick={() => hasInvoice && setViewInvoice(e.reference)}
+                    title={hasInvoice ? "Open invoice details" : undefined}>
+                  <td className="p-2 whitespace-nowrap">{shortDate(e.entry_date)}</td>
                   <td className="p-2">
                     <span className={up ? "text-orange-500" : "text-green-600"}>{e.entry_type}</span>
                     {e.note && <div className="text-[10px] text-muted-foreground">{e.note}</div>}
                   </td>
                   <td className="p-2 text-muted-foreground">{e.method ? methodLabel(e.method) : "—"}</td>
-                  <td className={`p-2 font-semibold ${up ? "text-orange-500" : "text-green-600"}`}>{up ? "+" : "−"}{money(e.amount)}</td>
-                  <td className="p-2 font-medium">{money(withRunning[e.id] ?? 0)}</td>
-                  <td className="p-2 text-muted-foreground">{e.reference || "—"}</td>
-                  <td className="p-2 text-right"><Button variant="ghost" size="icon" onClick={() => del(e.id)}><Trash2 className="h-4 w-4" /></Button></td>
+                  <td className={`p-2 font-semibold whitespace-nowrap ${up ? "text-orange-500" : "text-green-600"}`}>{up ? "+" : "−"}{money(e.amount)}</td>
+                  <td className="p-2 font-medium whitespace-nowrap">{money(withRunning[e.id] ?? 0)}</td>
+                  <td className="p-2 text-muted-foreground">
+                    {hasInvoice
+                      ? <span className="font-mono text-xs underline decoration-dotted text-primary">{e.reference}</span>
+                      : (e.reference || "—")}
+                  </td>
+                  <td className="p-2 text-right" onClick={(ev) => ev.stopPropagation()}>
+                    <Button variant="ghost" size="icon" onClick={() => del(e.id)}><Trash2 className="h-4 w-4" /></Button>
+                  </td>
                 </tr>
               );
             })}
@@ -328,6 +356,8 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
           </tbody>
         </table>
       </div>
+
+      <InvoiceQuickView invoiceRef={viewInvoice} onClose={() => setViewInvoice(null)} />
     </div>
   );
 }

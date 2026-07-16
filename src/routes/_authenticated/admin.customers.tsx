@@ -39,7 +39,7 @@ function CustomersAdmin() {
     const [{ data: r }, { data: p }, { data: c }] = await Promise.all([
       supabase.from("customer_purchases").select("*, products(product_name)").order("created_at", { ascending: false }),
       supabase.from("products").select("id, product_name, selling_price, purchase_price, quantity_in_stock"),
-      supabase.from("clients").select("id, name, current_balance").order("name"),
+      supabase.from("clients").select("id, name, account_no, current_balance").order("name"),
     ]);
     setRows(r ?? []); setProducts(p ?? []); setClients(c ?? []);
   };
@@ -150,7 +150,7 @@ function CustomersAdmin() {
               <SelectTrigger><SelectValue placeholder="— (required for udhar)" /></SelectTrigger>
               <SelectContent>{clients.map((c) => (
                 <SelectItem key={c.id} value={c.id}>
-                  {c.name}{Number(c.current_balance) > 0 ? ` — owes ${money(c.current_balance)}` : ""}
+                  {c.account_no ? `${c.account_no} · ` : ""}{c.name}{Number(c.current_balance) > 0 ? ` — owes ${money(c.current_balance)}` : ""}
                 </SelectItem>
               ))}</SelectContent>
             </Select>
