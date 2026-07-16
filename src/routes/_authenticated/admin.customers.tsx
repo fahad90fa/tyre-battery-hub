@@ -243,8 +243,8 @@ function CustomersAdmin() {
 function SalesTable({ rows }: { rows: any[] }) {
   const today = new Date().toISOString().slice(0, 10);
   return (
-    <div className="rounded-2xl bg-card shadow-sm overflow-hidden mt-3">
-      <table className="w-full text-sm">
+    <div className="rounded-2xl bg-card shadow-sm overflow-x-auto mt-3">
+      <table className="w-full min-w-[640px] text-sm">
         <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
           <tr><th className="p-3">Date</th><th className="p-3">Customer</th><th className="p-3">Product</th><th className="p-3">Qty</th><th className="p-3">Total</th><th className="p-3">Method</th><th className="p-3">Status</th></tr>
         </thead>

@@ -80,8 +80,8 @@ function StockAdmin() {
           <Button onClick={add} className="w-full">Add stock</Button>
         </div>
 
-        <div className="lg:col-span-2 rounded-2xl bg-card shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="lg:col-span-2 rounded-2xl bg-card shadow-sm overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
               <tr><th className="p-3">Date</th><th className="p-3">Supplier</th><th className="p-3">Product</th><th className="p-3">Qty</th><th className="p-3">Cost</th></tr>
             </thead>

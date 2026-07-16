@@ -89,8 +89,8 @@ function EmployeesAdmin() {
         </Dialog>
       </div>
 
-      <div className="rounded-2xl bg-card shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="rounded-2xl bg-card shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
             <tr><th className="p-3">Name</th><th className="p-3">Position</th><th className="p-3">Phone</th><th className="p-3">Salary</th><th className="p-3">Joined</th><th className="p-3">Status</th><th className="p-3"></th></tr>
           </thead>

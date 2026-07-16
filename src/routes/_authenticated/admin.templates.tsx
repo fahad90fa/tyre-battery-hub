@@ -94,8 +94,8 @@ function TemplatesAdmin() {
         </Dialog>
       </div>
 
-      <div className="rounded-2xl bg-card shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="rounded-2xl bg-card shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
             <tr><th className="p-3">Template</th><th className="p-3">Category</th><th className="p-3">Default price</th><th className="p-3"></th></tr>
           </thead>

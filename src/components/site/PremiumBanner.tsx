@@ -28,7 +28,7 @@ export function PremiumBanner() {
           />
         ))}
 
-        <div className="relative grid md:grid-cols-2 items-center min-h-[360px] p-10">
+        <div className="relative grid md:grid-cols-2 items-center min-h-[360px] p-6 sm:p-10">
           <div />
           <motion.div
             initial={{ opacity: 0, x: 30 }}
@@ -38,7 +38,7 @@ export function PremiumBanner() {
             className="text-white text-right md:text-left"
           >
             <div className="text-sm tracking-[0.3em] text-white/70 uppercase">Tires</div>
-            <div className="mt-2 text-5xl md:text-6xl font-black leading-none">
+            <div className="mt-2 text-4xl sm:text-5xl md:text-6xl font-black leading-none">
               <span className="text-transparent" style={{ WebkitTextStroke: "2px var(--brand-blue)" }}>
                 PREMIUM
               </span>
