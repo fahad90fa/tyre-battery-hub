@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel } from "@/lib/payments";
 import { InvoiceQuickView } from "@/components/admin/InvoiceQuickView";
+import { PurchaseQuickView } from "@/components/admin/PurchaseQuickView";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -200,6 +201,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
   const [current, setCurrent] = useState<number>(party.current_balance);
   const [overdueInvoices, setOverdueInvoices] = useState<any[]>([]);
   const [viewInvoice, setViewInvoice] = useState<string | null>(null);
+  const [viewPurchase, setViewPurchase] = useState<string | null>(null);
 
   const load = async () => {
     const { data: e } = await (supabase.from(LEDGER_TABLE[kind]) as any)
@@ -328,11 +330,13 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
             {entries.map((e) => {
               const up = INCREASES[kind].includes(e.entry_type);
               const hasInvoice = kind === "clients" && typeof e.reference === "string" && e.reference.startsWith("INV");
+              const hasPurchase = kind === "merchants" && typeof e.reference === "string" && e.reference.startsWith("PUR");
+              const clickable = hasInvoice || hasPurchase;
               return (
                 <tr key={e.id}
-                    className={`border-t ${hasInvoice ? "cursor-pointer hover:bg-muted/50" : ""}`}
-                    onClick={() => hasInvoice && setViewInvoice(e.reference)}
-                    title={hasInvoice ? "Open invoice details" : undefined}>
+                    className={`border-t ${clickable ? "cursor-pointer hover:bg-muted/50" : ""}`}
+                    onClick={() => { if (hasInvoice) setViewInvoice(e.reference); if (hasPurchase) setViewPurchase(e.reference); }}
+                    title={clickable ? "Open full details" : undefined}>
                   <td className="p-2 whitespace-nowrap">{shortDate(e.entry_date)}</td>
                   <td className="p-2">
                     <span className={up ? "text-orange-500" : "text-green-600"}>{e.entry_type}</span>
@@ -342,7 +346,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
                   <td className={`p-2 font-semibold whitespace-nowrap ${up ? "text-orange-500" : "text-green-600"}`}>{up ? "+" : "−"}{money(e.amount)}</td>
                   <td className="p-2 font-medium whitespace-nowrap">{money(withRunning[e.id] ?? 0)}</td>
                   <td className="p-2 text-muted-foreground">
-                    {hasInvoice
+                    {hasInvoice || hasPurchase
                       ? <span className="font-mono text-xs underline decoration-dotted text-primary">{e.reference}</span>
                       : (e.reference || "—")}
                   </td>
@@ -358,6 +362,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
       </div>
 
       <InvoiceQuickView invoiceRef={viewInvoice} onClose={() => setViewInvoice(null)} />
+      <PurchaseQuickView purchaseRef={viewPurchase} onClose={() => setViewPurchase(null)} />
     </div>
   );
 }

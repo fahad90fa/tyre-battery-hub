@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 import {
   LayoutDashboard, Package, Tag, Truck, Users, Wallet, FileText, BarChart3,
   ShoppingCart, LogOut, Wrench, Store, UserCircle, Briefcase, LayoutTemplate,
-  Inbox, Settings, Menu,
+  Inbox, Settings, Menu, FileSpreadsheet,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { signOut, useAuth } from "@/hooks/useAuth";
@@ -29,6 +29,7 @@ const GROUPS: { label: string; links: { to: string; label: string; icon: any; ex
   { label: "Sales", links: [
     { to: "/admin/customers", label: "Customer Sales", icon: ShoppingCart },
     { to: "/admin/invoices", label: "Invoices", icon: FileText },
+    { to: "/admin/quotations", label: "Quotations", icon: FileSpreadsheet },
   ]},
   { label: "Finance", links: [
     { to: "/admin/expenses", label: "Expenses", icon: Wallet },

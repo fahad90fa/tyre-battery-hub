@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate } from "@/lib/format";
@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Printer, EyeOff } from "lucide-react";
+import { Letterhead } from "@/components/admin/Letterhead";
 
 export const Route = createFileRoute("/_authenticated/admin/invoices")({
   component: InvoicesAdmin,
@@ -55,11 +56,14 @@ function InvoicesAdmin() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [rows, payments]);
 
+  const viewReq = useRef(0);
   const view = async (inv: any) => {
     setOpen(inv);
+    setItems([]);
     setPayForm({ method: "cash", amount: Math.max(0, Number(inv.total_amount) - paidOf(inv)) });
+    const req = ++viewReq.current;
     const { data } = await supabase.from("invoice_items").select("*").eq("invoice_id", inv.id);
-    setItems(data ?? []);
+    if (req === viewReq.current) setItems(data ?? []);
   };
 
   const addPayment = async () => {
@@ -148,8 +152,9 @@ function InvoicesAdmin() {
         <DialogContent className="max-w-xl print:shadow-none max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Invoice {open?.invoice_id}</DialogTitle></DialogHeader>
 
-          {/* Customer-facing section — this is what gets printed */}
-          <div id="invoice-print" className="text-sm space-y-2">
+          {/* Customer-facing section — this is what gets printed, on letterhead */}
+          <div className="print-area text-sm space-y-2">
+            <Letterhead docTitle="Invoice" docNo={open?.invoice_id ?? ""} date={open?.created_at} />
             <div className="flex justify-between text-muted-foreground">
               <span>Customer</span><span>{open?.customer_name}</span>
             </div>
