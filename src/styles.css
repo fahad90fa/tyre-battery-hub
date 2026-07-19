@@ -137,3 +137,35 @@
 @utility animate-sparkle {
   animation: sparkle 3s ease-in-out infinite;
 }
+
+/* Print: when a .print-area is present, print ONLY that area. */
+@media print {
+  body:has(.print-area) * {
+    visibility: hidden;
+  }
+  body:has(.print-area) .print-area,
+  body:has(.print-area) .print-area * {
+    visibility: visible;
+  }
+  body:has(.print-area) .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 24px;
+    background: white;
+    color: black;
+  }
+  /* Un-clip and un-position the dialog that hosts the print area so long
+     documents paginate instead of being cut at the dialog's max-height. */
+  body:has(.print-area) [role="dialog"] {
+    position: static !important;
+    transform: none !important;
+    translate: none !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+}

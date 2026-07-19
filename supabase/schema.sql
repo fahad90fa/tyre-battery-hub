@@ -1,6 +1,7 @@
 create extension if not exists pgcrypto;
 
 drop table if exists public.customer_purchases cascade;
+drop table if exists public.invoice_payments cascade;
 drop table if exists public.invoice_items cascade;
 drop table if exists public.invoices cascade;
 drop table if exists public.stock_purchases cascade;
@@ -19,9 +20,14 @@ drop table if exists public.merchants cascade;
 drop table if exists public.employees cascade;
 drop table if exists public.reports_inbox cascade;
 drop table if exists public.templates cascade;
+drop table if exists public.quotation_items cascade;
+drop table if exists public.quotations cascade;
 drop type if exists public.app_role cascade;
 
 create type public.app_role as enum ('admin', 'customer');
+
+create sequence if not exists public.client_account_no_seq start 1001;
+create sequence if not exists public.merchant_account_no_seq start 1001;
 
 create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -97,7 +103,9 @@ create table public.stock_purchases (
   purchase_price numeric,
   supplier_name text,
   product_id uuid,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  reference text,
+  merchant_id uuid
 );
 
 create table public.testimonials (
@@ -159,7 +167,7 @@ create table public.customer_purchases (
 );
 
 create table public.clients (
-  account_no text unique,
+  account_no text unique default ('CUST-' || nextval('public.client_account_no_seq')),
   cnic text,
   notes text,
   name text,
@@ -174,7 +182,7 @@ create table public.clients (
 );
 
 create table public.merchants (
-  account_no text unique,
+  account_no text unique default ('MER-' || nextval('public.merchant_account_no_seq')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   id uuid primary key default gen_random_uuid(),
@@ -252,3 +260,39 @@ create table public.templates (
   default_price numeric,
   image_url text
 );
+
+create sequence if not exists public.quotation_no_seq start 1001;
+
+create table public.quotations (
+  id uuid primary key default gen_random_uuid(),
+  quote_no text unique default ('QUO-' || nextval('public.quotation_no_seq')),
+  customer_name text not null,
+  client_id uuid references public.clients(id) on delete set null,
+  status text not null default 'draft',
+  valid_until date,
+  notes text,
+  total_amount numeric not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.quotation_items (
+  id uuid primary key default gen_random_uuid(),
+  quotation_id uuid not null references public.quotations(id) on delete cascade,
+  product_id uuid references public.products(id) on delete set null,
+  product_name text not null,
+  quantity integer not null default 1,
+  unit_price numeric not null default 0,
+  total_price numeric not null default 0
+);
+
+alter table public.stock_purchases
+  add constraint stock_purchases_merchant_id_fkey
+  foreign key (merchant_id) references public.merchants(id) on delete set null;
+
+create index if not exists stock_purchases_reference_idx on public.stock_purchases (reference);
+create index if not exists stock_purchases_merchant_id_idx on public.stock_purchases (merchant_id);
+create index if not exists quotation_items_quotation_id_idx on public.quotation_items (quotation_id);
+create index if not exists invoice_payments_invoice_id_idx on public.invoice_payments (invoice_id);
+create index if not exists invoice_payments_payment_date_idx on public.invoice_payments (payment_date);
+create index if not exists invoices_client_id_idx on public.invoices (client_id);

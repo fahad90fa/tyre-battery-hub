@@ -412,6 +412,91 @@ export type Database = {
           },
         ]
       }
+      quotations: {
+        Row: {
+          client_id: string | null
+          created_at: string
+          customer_name: string
+          id: string
+          notes: string | null
+          quote_no: string | null
+          status: string
+          total_amount: number
+          updated_at: string
+          valid_until: string | null
+        }
+        Insert: {
+          client_id?: string | null
+          created_at?: string
+          customer_name: string
+          id?: string
+          notes?: string | null
+          quote_no?: string | null
+          status?: string
+          total_amount?: number
+          updated_at?: string
+          valid_until?: string | null
+        }
+        Update: {
+          client_id?: string | null
+          created_at?: string
+          customer_name?: string
+          id?: string
+          notes?: string | null
+          quote_no?: string | null
+          status?: string
+          total_amount?: number
+          updated_at?: string
+          valid_until?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quotations_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quotation_items: {
+        Row: {
+          id: string
+          product_id: string | null
+          product_name: string
+          quantity: number
+          quotation_id: string
+          total_price: number
+          unit_price: number
+        }
+        Insert: {
+          id?: string
+          product_id?: string | null
+          product_name: string
+          quantity?: number
+          quotation_id: string
+          total_price?: number
+          unit_price?: number
+        }
+        Update: {
+          id?: string
+          product_id?: string | null
+          product_name?: string
+          quantity?: number
+          quotation_id?: string
+          total_price?: number
+          unit_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quotation_items_quotation_id_fkey"
+            columns: ["quotation_id"]
+            isOneToOne: false
+            referencedRelation: "quotations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       merchant_ledger: {
         Row: {
           amount: number
@@ -645,16 +730,20 @@ export type Database = {
           created_at: string
           date: string
           id: string
+          merchant_id: string | null
           product_id: string | null
           purchase_price: number
           quantity: number
+          reference: string | null
           supplier_name: string
         }
         Insert: {
           created_at?: string
           date?: string
           id?: string
+          merchant_id?: string | null
           product_id?: string | null
+          reference?: string | null
           purchase_price: number
           quantity: number
           supplier_name: string
@@ -663,7 +752,9 @@ export type Database = {
           created_at?: string
           date?: string
           id?: string
+          merchant_id?: string | null
           product_id?: string | null
+          reference?: string | null
           purchase_price?: number
           quantity?: number
           supplier_name?: string

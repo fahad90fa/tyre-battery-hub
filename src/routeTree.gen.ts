@@ -24,6 +24,7 @@ import { Route as AuthenticatedAdminUsersRouteImport } from './routes/_authentic
 import { Route as AuthenticatedAdminTemplatesRouteImport } from './routes/_authenticated/admin.templates'
 import { Route as AuthenticatedAdminStockRouteImport } from './routes/_authenticated/admin.stock'
 import { Route as AuthenticatedAdminReportsRouteImport } from './routes/_authenticated/admin.reports'
+import { Route as AuthenticatedAdminQuotationsRouteImport } from './routes/_authenticated/admin.quotations'
 import { Route as AuthenticatedAdminProfileRouteImport } from './routes/_authenticated/admin.profile'
 import { Route as AuthenticatedAdminProductsRouteImport } from './routes/_authenticated/admin.products'
 import { Route as AuthenticatedAdminMerchantsRouteImport } from './routes/_authenticated/admin.merchants'
@@ -111,6 +112,12 @@ const AuthenticatedAdminReportsRoute =
     path: '/reports',
     getParentRoute: () => AuthenticatedAdminRoute,
   } as any)
+const AuthenticatedAdminQuotationsRoute =
+  AuthenticatedAdminQuotationsRouteImport.update({
+    id: '/quotations',
+    path: '/quotations',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
 const AuthenticatedAdminProfileRoute =
   AuthenticatedAdminProfileRouteImport.update({
     id: '/profile',
@@ -191,6 +198,7 @@ export interface FileRoutesByFullPath {
   '/admin/merchants': typeof AuthenticatedAdminMerchantsRoute
   '/admin/products': typeof AuthenticatedAdminProductsRoute
   '/admin/profile': typeof AuthenticatedAdminProfileRoute
+  '/admin/quotations': typeof AuthenticatedAdminQuotationsRoute
   '/admin/reports': typeof AuthenticatedAdminReportsRoute
   '/admin/stock': typeof AuthenticatedAdminStockRoute
   '/admin/templates': typeof AuthenticatedAdminTemplatesRoute
@@ -216,6 +224,7 @@ export interface FileRoutesByTo {
   '/admin/merchants': typeof AuthenticatedAdminMerchantsRoute
   '/admin/products': typeof AuthenticatedAdminProductsRoute
   '/admin/profile': typeof AuthenticatedAdminProfileRoute
+  '/admin/quotations': typeof AuthenticatedAdminQuotationsRoute
   '/admin/reports': typeof AuthenticatedAdminReportsRoute
   '/admin/stock': typeof AuthenticatedAdminStockRoute
   '/admin/templates': typeof AuthenticatedAdminTemplatesRoute
@@ -244,6 +253,7 @@ export interface FileRoutesById {
   '/_authenticated/admin/merchants': typeof AuthenticatedAdminMerchantsRoute
   '/_authenticated/admin/products': typeof AuthenticatedAdminProductsRoute
   '/_authenticated/admin/profile': typeof AuthenticatedAdminProfileRoute
+  '/_authenticated/admin/quotations': typeof AuthenticatedAdminQuotationsRoute
   '/_authenticated/admin/reports': typeof AuthenticatedAdminReportsRoute
   '/_authenticated/admin/stock': typeof AuthenticatedAdminStockRoute
   '/_authenticated/admin/templates': typeof AuthenticatedAdminTemplatesRoute
@@ -272,6 +282,7 @@ export interface FileRouteTypes {
     | '/admin/merchants'
     | '/admin/products'
     | '/admin/profile'
+    | '/admin/quotations'
     | '/admin/reports'
     | '/admin/stock'
     | '/admin/templates'
@@ -297,6 +308,7 @@ export interface FileRouteTypes {
     | '/admin/merchants'
     | '/admin/products'
     | '/admin/profile'
+    | '/admin/quotations'
     | '/admin/reports'
     | '/admin/stock'
     | '/admin/templates'
@@ -324,6 +336,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/merchants'
     | '/_authenticated/admin/products'
     | '/_authenticated/admin/profile'
+    | '/_authenticated/admin/quotations'
     | '/_authenticated/admin/reports'
     | '/_authenticated/admin/stock'
     | '/_authenticated/admin/templates'
@@ -449,6 +462,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminReportsRouteImport
       parentRoute: typeof AuthenticatedAdminRoute
     }
+    '/_authenticated/admin/quotations': {
+      id: '/_authenticated/admin/quotations'
+      path: '/quotations'
+      fullPath: '/admin/quotations'
+      preLoaderRoute: typeof AuthenticatedAdminQuotationsRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
     '/_authenticated/admin/profile': {
       id: '/_authenticated/admin/profile'
       path: '/profile'
@@ -533,6 +553,7 @@ interface AuthenticatedAdminRouteChildren {
   AuthenticatedAdminMerchantsRoute: typeof AuthenticatedAdminMerchantsRoute
   AuthenticatedAdminProductsRoute: typeof AuthenticatedAdminProductsRoute
   AuthenticatedAdminProfileRoute: typeof AuthenticatedAdminProfileRoute
+  AuthenticatedAdminQuotationsRoute: typeof AuthenticatedAdminQuotationsRoute
   AuthenticatedAdminReportsRoute: typeof AuthenticatedAdminReportsRoute
   AuthenticatedAdminStockRoute: typeof AuthenticatedAdminStockRoute
   AuthenticatedAdminTemplatesRoute: typeof AuthenticatedAdminTemplatesRoute
@@ -551,6 +572,7 @@ const AuthenticatedAdminRouteChildren: AuthenticatedAdminRouteChildren = {
   AuthenticatedAdminMerchantsRoute: AuthenticatedAdminMerchantsRoute,
   AuthenticatedAdminProductsRoute: AuthenticatedAdminProductsRoute,
   AuthenticatedAdminProfileRoute: AuthenticatedAdminProfileRoute,
+  AuthenticatedAdminQuotationsRoute: AuthenticatedAdminQuotationsRoute,
   AuthenticatedAdminReportsRoute: AuthenticatedAdminReportsRoute,
   AuthenticatedAdminStockRoute: AuthenticatedAdminStockRoute,
   AuthenticatedAdminTemplatesRoute: AuthenticatedAdminTemplatesRoute,

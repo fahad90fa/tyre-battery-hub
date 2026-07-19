@@ -94,7 +94,8 @@ function CustomersAdmin() {
       if (inv) {
         await supabase.from("invoice_items").insert({
           invoice_id: inv.id, product_id: form.product_id, product_name: prod?.product_name ?? "",
-          quantity: qty, unit_price: prod?.selling_price ?? total,
+          quantity: qty,
+          unit_price: prod && Number(prod.selling_price) > 0 ? prod.selling_price : (qty > 0 ? total / qty : total),
           total_price: total, cost_price: prod?.purchase_price ?? null,
         });
         if (activeLines.length > 0) {
@@ -171,14 +172,26 @@ function CustomersAdmin() {
                 setForm({ ...form, product_id: v, total_price: p ? p.selling_price * form.quantity_purchased : 0 });
               }}
               placeholder="Select product"
-              searchPlaceholder="Search product..."
+              searchPlaceholder="Search or type new product name..."
+              onCreate={async (name) => {
+                const { data, error } = await supabase.from("products")
+                  .insert({ product_name: name, quantity_in_stock: 0, purchase_price: 0, selling_price: 0 })
+                  .select().maybeSingle();
+                if (error) return toast.error(error.message);
+                if (data) {
+                  setProducts((ps: any[]) => [...ps, data]);
+                  setForm((f: any) => ({ ...f, product_id: data.id, total_price: 0 }));
+                  toast.success(`New product "${name}" added — set its price in the Total box`);
+                }
+              }}
+              createLabel="Add new product"
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1.5"><Label>Qty</Label><Input type="number" value={form.quantity_purchased} onChange={(e) => {
               const qty = Number(e.target.value);
               const p = products.find((x) => x.id === form.product_id);
-              setForm({ ...form, quantity_purchased: qty, total_price: p ? p.selling_price * qty : form.total_price });
+              setForm({ ...form, quantity_purchased: qty, total_price: p && Number(p.selling_price) > 0 ? p.selling_price * qty : form.total_price });
             }} /></div>
             <div className="space-y-1.5"><Label>Total</Label><Input type="number" value={form.total_price} onChange={(e) => setForm({ ...form, total_price: Number(e.target.value) })} /></div>
           </div>
