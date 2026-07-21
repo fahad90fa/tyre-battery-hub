@@ -4,6 +4,7 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
+import { applyPct, impliedPct } from "@/lib/pricing";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { InvoiceQuickView } from "@/components/admin/InvoiceQuickView";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ export const Route = createFileRoute("/_authenticated/admin/pos")({
   component: PosPage,
 });
 
-type CartLine = { product_id: string; name: string; qty: number; price: number; cost: number | null; stock: number };
+type CartLine = { product_id: string; name: string; qty: number; price: number; base: number; pct: number; cost: number | null; stock: number };
 type PayLine = { method: string; amount: number };
 
 function PosPage() {
@@ -30,6 +31,7 @@ function PosPage() {
   const [splitMode, setSplitMode] = useState(false);
   const [payLines, setPayLines] = useState<PayLine[]>([{ method: "cash", amount: 0 }]);
   const [dueDate, setDueDate] = useState("");
+  const [billPct, setBillPct] = useState("");
   const [saving, setSaving] = useState(false);
   const [lastInvoice, setLastInvoice] = useState<string | null>(null);
   const [viewInvoice, setViewInvoice] = useState<string | null>(null);
@@ -59,9 +61,10 @@ function PosPage() {
     setCart((c) => {
       const i = c.findIndex((l) => l.product_id === p.id);
       if (i >= 0) return c.map((l, j) => (j === i ? { ...l, qty: l.qty + 1 } : l));
+      const base = Number(p.selling_price) || 0;
       return [...c, {
         product_id: p.id, name: p.product_name, qty: 1,
-        price: Number(p.selling_price) || 0, cost: p.purchase_price ?? null,
+        price: base, base, pct: 0, cost: p.purchase_price ?? null,
         stock: p.quantity_in_stock ?? 0,
       }];
     });
@@ -82,7 +85,7 @@ function PosPage() {
   };
 
   const reset = () => {
-    setCart([]); setCustomerName(""); setClientId("");
+    setCart([]); setCustomerName(""); setClientId(""); setBillPct("");
     setSplitMode(false); setPayLines([{ method: "cash", amount: 0 }]); setDueDate("");
   };
 
@@ -224,22 +227,52 @@ function PosPage() {
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                  <div className="mt-1.5 flex items-center gap-2">
+                  <div className="mt-1.5 flex items-center gap-1.5">
                     <div className="flex items-center rounded-lg border">
                       <button className="px-2 py-1 hover:bg-muted" onClick={() => setCartLine(i, { qty: Math.max(1, l.qty - 1) })}><Minus className="h-3 w-3" /></button>
-                      <Input type="number" className="h-7 w-14 border-0 text-center px-1" value={l.qty}
+                      <Input type="number" className="h-7 w-12 border-0 text-center px-1" value={l.qty}
                              onChange={(e) => setCartLine(i, { qty: Math.max(1, Number(e.target.value) || 1) })} />
                       <button className="px-2 py-1 hover:bg-muted" onClick={() => setCartLine(i, { qty: l.qty + 1 })}><Plus className="h-3 w-3" /></button>
                     </div>
-                    <Input type="number" className="h-7 flex-1" placeholder="Price" value={l.price || ""}
-                           onChange={(e) => setCartLine(i, { price: Number(e.target.value) })} />
+                    <Input type="number" className="h-7 flex-1 min-w-0" placeholder="Price" value={l.price || ""}
+                           onChange={(e) => {
+                             const price = Number(e.target.value);
+                             setCartLine(i, { price, pct: impliedPct(l.base, price) });
+                           }} />
+                    <div className="relative w-16 shrink-0">
+                      <Input type="number" className="h-7 pr-4 text-right" placeholder="0" value={l.pct || ""}
+                             onChange={(e) => {
+                               const pct = Number(e.target.value);
+                               setCartLine(i, { pct, price: applyPct(l.base, pct) });
+                             }} />
+                      <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                    </div>
                     <div className="text-sm font-semibold whitespace-nowrap">{money(l.qty * l.price)}</div>
                   </div>
+                  {l.pct !== 0 && l.base > 0 && (
+                    <div className="mt-1 text-[10px] text-muted-foreground">
+                      Retail {money(l.base)} {l.pct > 0 ? "+" : ""}{l.pct}% → {money(l.price)}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           )}
 
+          {cart.length > 0 && (
+            <div className="flex items-center gap-2 border-t pt-2">
+              <Label className="text-xs whitespace-nowrap">Adjust all items</Label>
+              <div className="relative w-20">
+                <Input type="number" className="h-8 pr-4 text-right" placeholder="+/-" value={billPct}
+                       onChange={(e) => setBillPct(e.target.value)} />
+                <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => {
+                const pct = Number(billPct) || 0;
+                setCart((c) => c.map((l) => (l.base > 0 ? { ...l, pct, price: applyPct(l.base, pct) } : l)));
+              }}>Apply</Button>
+            </div>
+          )}
           <div className="flex justify-between items-center text-lg font-black border-t pt-2">
             <span>Total</span><span>{money(total)}</span>
           </div>

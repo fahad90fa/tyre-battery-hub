@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
+import { applyPct, impliedPct } from "@/lib/pricing";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -14,9 +15,9 @@ export const Route = createFileRoute("/_authenticated/admin/stock")({
   component: StockAdmin,
 });
 
-type PurchaseLine = { product_id: string; quantity: number; unit_cost: number };
+type PurchaseLine = { product_id: string; quantity: number; unit_cost: number; base: number; pct: number };
 
-const emptyLine = (): PurchaseLine => ({ product_id: "", quantity: 1, unit_cost: 0 });
+const emptyLine = (): PurchaseLine => ({ product_id: "", quantity: 1, unit_cost: 0, base: 0, pct: 0 });
 
 function StockAdmin() {
   const [rows, setRows] = useState<any[]>([]);
@@ -155,7 +156,11 @@ function StockAdmin() {
                     <SearchableSelect
                       options={products.map((p) => ({ value: p.id, label: p.product_name, hint: `stock ${p.quantity_in_stock}` }))}
                       value={l.product_id}
-                      onValueChange={(v) => setLine(i, { product_id: v })}
+                      onValueChange={(v) => {
+                        const p = products.find((x) => x.id === v);
+                        const base = Number(p?.purchase_price) || 0;
+                        setLine(i, { product_id: v, base, pct: 0, unit_cost: l.unit_cost || base });
+                      }}
                       placeholder="Product"
                       searchPlaceholder="Search or type new product name..."
                       onCreate={(name) => createProduct(i, name)}
@@ -168,13 +173,28 @@ function StockAdmin() {
                     </Button>
                   )}
                 </div>
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className="grid grid-cols-4 gap-1.5">
                   <Input type="number" placeholder="Qty" value={l.quantity || ""} onChange={(e) => setLine(i, { quantity: Number(e.target.value) })} />
-                  <Input type="number" placeholder="Unit cost" value={l.unit_cost || ""} onChange={(e) => setLine(i, { unit_cost: Number(e.target.value) })} />
+                  <Input type="number" placeholder="Unit cost" value={l.unit_cost || ""} onChange={(e) => {
+                    const unit_cost = Number(e.target.value);
+                    setLine(i, { unit_cost, pct: impliedPct(l.base, unit_cost) });
+                  }} />
+                  <div className="relative">
+                    <Input type="number" placeholder="+/-" className="pr-4 text-right" value={l.pct || ""} onChange={(e) => {
+                      const pct = Number(e.target.value) || 0;
+                      setLine(i, { pct, unit_cost: l.base > 0 ? applyPct(l.base, pct) : l.unit_cost });
+                    }} />
+                    <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                  </div>
                   <div className="grid place-items-center text-xs font-semibold text-muted-foreground">
                     {money((Number(l.quantity) || 0) * (Number(l.unit_cost) || 0))}
                   </div>
                 </div>
+                {l.pct !== 0 && l.base > 0 && (
+                  <div className="text-[10px] text-muted-foreground">
+                    Last cost {money(l.base)} {l.pct > 0 ? "+" : ""}{l.pct}% → {money(l.unit_cost)}
+                  </div>
+                )}
               </div>
             ))}
             <div className="flex justify-between text-sm pt-1 border-t">

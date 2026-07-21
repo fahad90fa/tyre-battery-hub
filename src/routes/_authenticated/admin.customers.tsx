@@ -4,6 +4,7 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
+import { applyPct } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +26,7 @@ const emptyForm = {
   product_id: "",
   quantity_purchased: 1,
   total_price: 0,
+  pct: 0,
   due_date: "",
 };
 
@@ -171,7 +173,7 @@ function CustomersAdmin() {
               value={form.product_id}
               onValueChange={(v) => {
                 const p = products.find((x) => x.id === v);
-                setForm({ ...form, product_id: v, total_price: p ? p.selling_price * form.quantity_purchased : 0 });
+                setForm({ ...form, product_id: v, total_price: p && Number(p.selling_price) > 0 ? applyPct(p.selling_price * form.quantity_purchased, form.pct) : 0 });
               }}
               placeholder="Select product"
               searchPlaceholder="Search or type new product name..."
@@ -189,14 +191,27 @@ function CustomersAdmin() {
               createLabel="Add new product"
             />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <div className="space-y-1.5"><Label>Qty</Label><Input type="number" value={form.quantity_purchased} onChange={(e) => {
               const qty = Number(e.target.value);
               const p = products.find((x) => x.id === form.product_id);
-              setForm({ ...form, quantity_purchased: qty, total_price: p && Number(p.selling_price) > 0 ? p.selling_price * qty : form.total_price });
+              setForm({ ...form, quantity_purchased: qty, total_price: p && Number(p.selling_price) > 0 ? applyPct(p.selling_price * qty, form.pct) : form.total_price });
+            }} /></div>
+            <div className="space-y-1.5"><Label>Adjust %</Label><Input type="number" placeholder="+/-" value={form.pct || ""} onChange={(e) => {
+              const pct = Number(e.target.value) || 0;
+              const p = products.find((x) => x.id === form.product_id);
+              setForm({ ...form, pct, total_price: p && Number(p.selling_price) > 0 ? applyPct(p.selling_price * form.quantity_purchased, pct) : form.total_price });
             }} /></div>
             <div className="space-y-1.5"><Label>Total</Label><Input type="number" value={form.total_price} onChange={(e) => setForm({ ...form, total_price: Number(e.target.value) })} /></div>
           </div>
+          {form.pct !== 0 && form.product_id && (() => {
+            const p = products.find((x) => x.id === form.product_id);
+            return p && Number(p.selling_price) > 0 ? (
+              <div className="text-[11px] text-muted-foreground -mt-1">
+                Retail {p.selling_price.toLocaleString()} × {form.quantity_purchased} {form.pct > 0 ? "+" : ""}{form.pct}% = {form.total_price.toLocaleString()}
+              </div>
+            ) : null;
+          })()}
 
           <div className="rounded-xl border p-3 space-y-2">
             <div className="flex items-center justify-between">
