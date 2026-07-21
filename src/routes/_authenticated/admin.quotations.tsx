@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate } from "@/lib/format";
 import { Letterhead } from "@/components/admin/Letterhead";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
+import { applyPct, impliedPct } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,8 +19,8 @@ export const Route = createFileRoute("/_authenticated/admin/quotations")({
   component: QuotationsAdmin,
 });
 
-type QuoteLine = { product_id: string; product_name: string; quantity: number; unit_price: number; priceEdited?: boolean };
-const emptyLine = (): QuoteLine => ({ product_id: "", product_name: "", quantity: 1, unit_price: 0 });
+type QuoteLine = { product_id: string; product_name: string; quantity: number; unit_price: number; base: number; pct: number; priceEdited?: boolean };
+const emptyLine = (): QuoteLine => ({ product_id: "", product_name: "", quantity: 1, unit_price: 0, base: 0, pct: 0 });
 
 const STATUSES = ["draft", "sent", "accepted", "converted"] as const;
 
@@ -288,9 +289,10 @@ function QuotationsAdmin() {
                         value={l.product_id}
                         onValueChange={(v) => {
                           const p = products.find((x) => x.id === v);
+                          const base = Number(p?.selling_price ?? 0);
                           setLine(i, {
-                            product_id: v, product_name: p?.product_name ?? "",
-                            unit_price: l.priceEdited && l.unit_price ? l.unit_price : Number(p?.selling_price ?? 0),
+                            product_id: v, product_name: p?.product_name ?? "", base,
+                            unit_price: l.priceEdited && l.unit_price ? l.unit_price : applyPct(base, l.pct),
                           });
                         }}
                         placeholder={l.product_name || "Product"}
@@ -308,13 +310,28 @@ function QuotationsAdmin() {
                   {l.product_name && !l.product_id && (
                     <div className="text-[11px] text-primary">Custom item: {l.product_name}</div>
                   )}
-                  <div className="grid grid-cols-3 gap-1.5">
+                  <div className="grid grid-cols-4 gap-1.5">
                     <Input type="number" placeholder="Qty" value={l.quantity || ""} onChange={(e) => setLine(i, { quantity: Number(e.target.value) })} />
-                    <Input type="number" placeholder="Unit price" value={l.unit_price || ""} onChange={(e) => setLine(i, { unit_price: Number(e.target.value), priceEdited: true })} />
+                    <Input type="number" placeholder="Unit price" value={l.unit_price || ""} onChange={(e) => {
+                      const unit_price = Number(e.target.value);
+                      setLine(i, { unit_price, priceEdited: true, pct: impliedPct(l.base, unit_price) });
+                    }} />
+                    <div className="relative">
+                      <Input type="number" placeholder="+/-" className="pr-4 text-right" value={l.pct || ""} onChange={(e) => {
+                        const pct = Number(e.target.value) || 0;
+                        setLine(i, { pct, unit_price: l.base > 0 ? applyPct(l.base, pct) : l.unit_price, priceEdited: true });
+                      }} />
+                      <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                    </div>
                     <div className="grid place-items-center text-xs font-semibold text-muted-foreground">
                       {money((Number(l.quantity) || 0) * (Number(l.unit_price) || 0))}
                     </div>
                   </div>
+                  {l.pct !== 0 && l.base > 0 && (
+                    <div className="text-[10px] text-muted-foreground">
+                      Retail {money(l.base)} {l.pct > 0 ? "+" : ""}{l.pct}% → {money(l.unit_price)}
+                    </div>
+                  )}
                 </div>
               ))}
               <div className="flex justify-between text-sm pt-1 border-t">

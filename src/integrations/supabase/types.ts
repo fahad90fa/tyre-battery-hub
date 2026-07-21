@@ -207,6 +207,54 @@ export type Database = {
           },
         ]
       }
+      daily_closings: {
+        Row: {
+          cash_in_hand: number | null
+          cash_sales: number
+          closing_date: string
+          created_at: string
+          credit_sales: number
+          expenses: number
+          id: string
+          net_cash: number
+          net_sales: number
+          notes: string | null
+          recoveries: number
+          total_cash_in: number
+          updated_at: string
+        }
+        Insert: {
+          cash_in_hand?: number | null
+          cash_sales?: number
+          closing_date: string
+          created_at?: string
+          credit_sales?: number
+          expenses?: number
+          id?: string
+          net_cash?: number
+          net_sales?: number
+          notes?: string | null
+          recoveries?: number
+          total_cash_in?: number
+          updated_at?: string
+        }
+        Update: {
+          cash_in_hand?: number | null
+          cash_sales?: number
+          closing_date?: string
+          created_at?: string
+          credit_sales?: number
+          expenses?: number
+          id?: string
+          net_cash?: number
+          net_sales?: number
+          notes?: string | null
+          recoveries?: number
+          total_cash_in?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       employees: {
         Row: {
           cnic: string | null
@@ -765,6 +813,13 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_purchases_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
             referencedColumns: ["id"]
           },
         ]

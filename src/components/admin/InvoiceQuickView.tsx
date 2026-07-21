@@ -4,6 +4,7 @@ import { money, shortDate } from "@/lib/format";
 import { methodLabel } from "@/lib/payments";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Letterhead } from "@/components/admin/Letterhead";
 import { Printer } from "lucide-react";
 
 /**
@@ -43,7 +44,8 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
           </div>
         )}
         {inv && (
-          <div className="text-sm space-y-2">
+          <div className="print-area text-sm space-y-2">
+            <Letterhead docTitle="Invoice" docNo={inv.invoice_id} date={inv.created_at} />
             <div className="flex justify-between text-muted-foreground">
               <span>Customer</span><span className="text-foreground">{inv.customer_name}</span>
             </div>

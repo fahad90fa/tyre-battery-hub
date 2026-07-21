@@ -4,6 +4,7 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
+import { applyPct } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +26,7 @@ const emptyForm = {
   product_id: "",
   quantity_purchased: 1,
   total_price: 0,
+  pct: 0,
   due_date: "",
 };
 
@@ -55,18 +57,20 @@ function CustomersAdmin() {
     setPayLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
   const add = async () => {
-    if (!form.customer_name || !form.product_id) return toast.error("Fill required fields");
+    if (!form.product_id) return toast.error("Select a product");
     if (paid > total) return toast.error("Payments exceed the total amount");
     if (remaining > 0 && !form.client_id)
       return toast.error("Credit (udhar) sale — link a customer account so the balance is tracked");
     const prod = products.find((p) => p.id === form.product_id);
     const qty = Number(form.quantity_purchased) || 1;
     const activeLines = payLines.filter((l) => Number(l.amount) > 0);
+    const custName = form.customer_name?.trim() ||
+      (form.client_id ? clients.find((c) => c.id === form.client_id)?.name ?? "Walk-in customer" : "Walk-in customer");
 
     setSaving(true);
     try {
       const { error } = await supabase.from("customer_purchases").insert({
-        customer_name: form.customer_name, product_id: form.product_id,
+        customer_name: custName, product_id: form.product_id,
         quantity_purchased: qty, total_price: total,
         cost_price: prod?.purchase_price ?? null,
         payment_method: summarizeMethods(activeLines.map((l) => l.method)),
@@ -83,7 +87,7 @@ function CustomersAdmin() {
 
       const invId = "INV-" + Date.now();
       const { data: inv, error: invErr } = await supabase.from("invoices").insert({
-        invoice_id: invId, customer_name: form.customer_name, total_amount: total,
+        invoice_id: invId, customer_name: custName, total_amount: total,
         payment_method: summarizeMethods(activeLines.map((l) => l.method)),
         payment_status: status,
         client_id: form.client_id || null,
@@ -143,7 +147,7 @@ function CustomersAdmin() {
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="rounded-2xl bg-card p-5 shadow-sm space-y-3">
           <div className="font-semibold">Record sale</div>
-          <div className="space-y-1.5"><Label>Customer name</Label><Input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} /></div>
+          <div className="space-y-1.5"><Label>Customer name (optional — walk-in by default)</Label><Input placeholder="Walk-in customer" value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} /></div>
           <div className="space-y-1.5"><Label>Customer account {remaining > 0 && <span className="text-destructive">*</span>}</Label>
             <SearchableSelect
               options={clients.map((c) => ({
@@ -169,7 +173,7 @@ function CustomersAdmin() {
               value={form.product_id}
               onValueChange={(v) => {
                 const p = products.find((x) => x.id === v);
-                setForm({ ...form, product_id: v, total_price: p ? p.selling_price * form.quantity_purchased : 0 });
+                setForm({ ...form, product_id: v, total_price: p && Number(p.selling_price) > 0 ? applyPct(p.selling_price * form.quantity_purchased, form.pct) : 0 });
               }}
               placeholder="Select product"
               searchPlaceholder="Search or type new product name..."
@@ -187,14 +191,27 @@ function CustomersAdmin() {
               createLabel="Add new product"
             />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <div className="space-y-1.5"><Label>Qty</Label><Input type="number" value={form.quantity_purchased} onChange={(e) => {
               const qty = Number(e.target.value);
               const p = products.find((x) => x.id === form.product_id);
-              setForm({ ...form, quantity_purchased: qty, total_price: p && Number(p.selling_price) > 0 ? p.selling_price * qty : form.total_price });
+              setForm({ ...form, quantity_purchased: qty, total_price: p && Number(p.selling_price) > 0 ? applyPct(p.selling_price * qty, form.pct) : form.total_price });
+            }} /></div>
+            <div className="space-y-1.5"><Label>Adjust %</Label><Input type="number" placeholder="+/-" value={form.pct || ""} onChange={(e) => {
+              const pct = Number(e.target.value) || 0;
+              const p = products.find((x) => x.id === form.product_id);
+              setForm({ ...form, pct, total_price: p && Number(p.selling_price) > 0 ? applyPct(p.selling_price * form.quantity_purchased, pct) : form.total_price });
             }} /></div>
             <div className="space-y-1.5"><Label>Total</Label><Input type="number" value={form.total_price} onChange={(e) => setForm({ ...form, total_price: Number(e.target.value) })} /></div>
           </div>
+          {form.pct !== 0 && form.product_id && (() => {
+            const p = products.find((x) => x.id === form.product_id);
+            return p && Number(p.selling_price) > 0 ? (
+              <div className="text-[11px] text-muted-foreground -mt-1">
+                Retail {p.selling_price.toLocaleString()} × {form.quantity_purchased} {form.pct > 0 ? "+" : ""}{form.pct}% = {form.total_price.toLocaleString()}
+              </div>
+            ) : null;
+          })()}
 
           <div className="rounded-xl border p-3 space-y-2">
             <div className="flex items-center justify-between">
