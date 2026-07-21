@@ -55,18 +55,20 @@ function CustomersAdmin() {
     setPayLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
   const add = async () => {
-    if (!form.customer_name || !form.product_id) return toast.error("Fill required fields");
+    if (!form.product_id) return toast.error("Select a product");
     if (paid > total) return toast.error("Payments exceed the total amount");
     if (remaining > 0 && !form.client_id)
       return toast.error("Credit (udhar) sale — link a customer account so the balance is tracked");
     const prod = products.find((p) => p.id === form.product_id);
     const qty = Number(form.quantity_purchased) || 1;
     const activeLines = payLines.filter((l) => Number(l.amount) > 0);
+    const custName = form.customer_name?.trim() ||
+      (form.client_id ? clients.find((c) => c.id === form.client_id)?.name ?? "Walk-in customer" : "Walk-in customer");
 
     setSaving(true);
     try {
       const { error } = await supabase.from("customer_purchases").insert({
-        customer_name: form.customer_name, product_id: form.product_id,
+        customer_name: custName, product_id: form.product_id,
         quantity_purchased: qty, total_price: total,
         cost_price: prod?.purchase_price ?? null,
         payment_method: summarizeMethods(activeLines.map((l) => l.method)),
@@ -83,7 +85,7 @@ function CustomersAdmin() {
 
       const invId = "INV-" + Date.now();
       const { data: inv, error: invErr } = await supabase.from("invoices").insert({
-        invoice_id: invId, customer_name: form.customer_name, total_amount: total,
+        invoice_id: invId, customer_name: custName, total_amount: total,
         payment_method: summarizeMethods(activeLines.map((l) => l.method)),
         payment_status: status,
         client_id: form.client_id || null,
@@ -143,7 +145,7 @@ function CustomersAdmin() {
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="rounded-2xl bg-card p-5 shadow-sm space-y-3">
           <div className="font-semibold">Record sale</div>
-          <div className="space-y-1.5"><Label>Customer name</Label><Input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} /></div>
+          <div className="space-y-1.5"><Label>Customer name (optional — walk-in by default)</Label><Input placeholder="Walk-in customer" value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} /></div>
           <div className="space-y-1.5"><Label>Customer account {remaining > 0 && <span className="text-destructive">*</span>}</Label>
             <SearchableSelect
               options={clients.map((c) => ({

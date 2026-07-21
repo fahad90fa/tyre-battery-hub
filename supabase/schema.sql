@@ -20,6 +20,7 @@ drop table if exists public.merchants cascade;
 drop table if exists public.employees cascade;
 drop table if exists public.reports_inbox cascade;
 drop table if exists public.templates cascade;
+drop table if exists public.daily_closings cascade;
 drop table if exists public.quotation_items cascade;
 drop table if exists public.quotations cascade;
 drop type if exists public.app_role cascade;
@@ -296,3 +297,19 @@ create index if not exists quotation_items_quotation_id_idx on public.quotation_
 create index if not exists invoice_payments_invoice_id_idx on public.invoice_payments (invoice_id);
 create index if not exists invoice_payments_payment_date_idx on public.invoice_payments (payment_date);
 create index if not exists invoices_client_id_idx on public.invoices (client_id);
+
+create table public.daily_closings (
+  id uuid primary key default gen_random_uuid(),
+  closing_date date not null unique,
+  net_sales numeric not null default 0,
+  cash_sales numeric not null default 0,
+  credit_sales numeric not null default 0,
+  recoveries numeric not null default 0,
+  total_cash_in numeric not null default 0,
+  expenses numeric not null default 0,
+  net_cash numeric not null default 0,
+  cash_in_hand numeric,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);

@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 import {
   LayoutDashboard, Package, Tag, Truck, Users, Wallet, FileText, BarChart3,
   ShoppingCart, LogOut, Wrench, Store, UserCircle, Briefcase, LayoutTemplate,
-  Inbox, Settings, Menu, FileSpreadsheet,
+  Inbox, Settings, Menu, FileSpreadsheet, Zap, CalendarCheck, ArrowLeftRight,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { signOut, useAuth } from "@/hooks/useAuth";
@@ -17,6 +17,7 @@ const GROUPS: { label: string; links: { to: string; label: string; icon: any; ex
     { to: "/admin/categories", label: "Categories", icon: Tag },
     { to: "/admin/templates", label: "Templates", icon: LayoutTemplate },
     { to: "/admin/stock", label: "Stock Purchases", icon: Truck },
+    { to: "/admin/inventory", label: "Stock Movements", icon: ArrowLeftRight },
   ]},
   { label: "Accounts", links: [
     { to: "/admin/clients", label: "Customer Accounts", icon: UserCircle },
@@ -27,11 +28,13 @@ const GROUPS: { label: string; links: { to: string; label: string; icon: any; ex
     { to: "/admin/users", label: "Users", icon: Users },
   ]},
   { label: "Sales", links: [
+    { to: "/admin/pos", label: "Quick Sale (POS)", icon: Zap },
     { to: "/admin/customers", label: "Customer Sales", icon: ShoppingCart },
     { to: "/admin/invoices", label: "Invoices", icon: FileText },
     { to: "/admin/quotations", label: "Quotations", icon: FileSpreadsheet },
   ]},
   { label: "Finance", links: [
+    { to: "/admin/closing", label: "Daily Closing", icon: CalendarCheck },
     { to: "/admin/expenses", label: "Expenses", icon: Wallet },
     { to: "/admin/reports", label: "Reports", icon: BarChart3 },
   ]},
