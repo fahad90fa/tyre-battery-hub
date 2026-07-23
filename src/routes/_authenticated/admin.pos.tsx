@@ -220,37 +220,51 @@ function PosPage() {
           ) : (
             <div className="space-y-2">
               {cart.map((l, i) => (
-                <div key={l.product_id} className="rounded-xl border p-2.5">
+                <div key={l.product_id} className="rounded-xl border bg-muted/20 p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-sm font-medium leading-tight flex-1 min-w-0 truncate">{l.name}</div>
                     <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setCart(cart.filter((_, j) => j !== i))}>
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                  <div className="mt-1.5 flex items-center gap-1.5">
-                    <div className="flex items-center rounded-lg border">
-                      <button className="px-2 py-1 hover:bg-muted" onClick={() => setCartLine(i, { qty: Math.max(1, l.qty - 1) })}><Minus className="h-3 w-3" /></button>
-                      <Input type="number" className="h-7 w-12 border-0 text-center px-1" value={l.qty}
-                             onChange={(e) => setCartLine(i, { qty: Math.max(1, Number(e.target.value) || 1) })} />
-                      <button className="px-2 py-1 hover:bg-muted" onClick={() => setCartLine(i, { qty: l.qty + 1 })}><Plus className="h-3 w-3" /></button>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-muted-foreground">Quantity</div>
+                      <div className="flex items-center rounded-lg border h-9">
+                        <button className="px-2.5 h-full hover:bg-muted rounded-l-lg" onClick={() => setCartLine(i, { qty: Math.max(1, l.qty - 1) })}><Minus className="h-3.5 w-3.5" /></button>
+                        <Input type="number" className="h-full flex-1 border-0 text-center px-1" value={l.qty}
+                               onChange={(e) => setCartLine(i, { qty: Math.max(1, Number(e.target.value) || 1) })} />
+                        <button className="px-2.5 h-full hover:bg-muted rounded-r-lg" onClick={() => setCartLine(i, { qty: l.qty + 1 })}><Plus className="h-3.5 w-3.5" /></button>
+                      </div>
                     </div>
-                    <Input type="number" className="h-7 flex-1 min-w-0" placeholder="Price" value={l.price || ""}
-                           onChange={(e) => {
-                             const price = Number(e.target.value);
-                             setCartLine(i, { price, pct: impliedPct(l.base, price) });
-                           }} />
-                    <div className="relative w-16 shrink-0">
-                      <Input type="number" className="h-7 pr-4 text-right" placeholder="0" value={l.pct || ""}
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-muted-foreground">Price (Rs)</div>
+                      <Input type="number" className="h-9" placeholder="0" value={l.price || ""}
                              onChange={(e) => {
-                               const pct = Number(e.target.value);
-                               setCartLine(i, { pct, price: applyPct(l.base, pct) });
+                               const price = Number(e.target.value);
+                               setCartLine(i, { price, pct: impliedPct(l.base, price) });
                              }} />
-                      <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
                     </div>
-                    <div className="text-sm font-semibold whitespace-nowrap">{money(l.qty * l.price)}</div>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 items-end">
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-muted-foreground">Adjust % (+/−, manual)</div>
+                      <div className="relative">
+                        <Input type="number" className="h-9 pr-6 text-right" placeholder="0" value={l.pct || ""}
+                               onChange={(e) => {
+                                 const pct = Number(e.target.value);
+                                 setCartLine(i, { pct, price: applyPct(l.base, pct) });
+                               }} />
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-muted-foreground">Line total</div>
+                      <div className="h-9 rounded-md border bg-muted/40 grid place-items-center text-sm font-bold">{money(l.qty * l.price)}</div>
+                    </div>
                   </div>
                   {l.pct !== 0 && l.base > 0 && (
-                    <div className="mt-1 text-[10px] text-muted-foreground">
+                    <div className="mt-1.5 text-[11px] text-muted-foreground">
                       Retail {money(l.base)} {l.pct > 0 ? "+" : ""}{l.pct}% → {money(l.price)}
                     </div>
                   )}
