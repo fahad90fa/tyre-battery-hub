@@ -281,7 +281,7 @@ function QuotationsAdmin() {
                 </Button>
               </div>
               {lines.map((l, i) => (
-                <div key={i} className="space-y-1.5 border-b last:border-0 pb-2 last:pb-0">
+                <div key={i} className="space-y-2.5 rounded-xl border bg-muted/20 p-3">
                   <div className="flex gap-1.5 items-center">
                     <div className="flex-1 min-w-0">
                       <SearchableSelect
@@ -290,9 +290,10 @@ function QuotationsAdmin() {
                         onValueChange={(v) => {
                           const p = products.find((x) => x.id === v);
                           const base = Number(p?.selling_price ?? 0);
+                          // Fresh retail price; % is manual per transaction.
                           setLine(i, {
                             product_id: v, product_name: p?.product_name ?? "", base,
-                            unit_price: l.priceEdited && l.unit_price ? l.unit_price : applyPct(base, l.pct),
+                            pct: 0, unit_price: base, priceEdited: false,
                           });
                         }}
                         placeholder={l.product_name || "Product"}
@@ -310,25 +311,39 @@ function QuotationsAdmin() {
                   {l.product_name && !l.product_id && (
                     <div className="text-[11px] text-primary">Custom item: {l.product_name}</div>
                   )}
-                  <div className="grid grid-cols-4 gap-1.5">
-                    <Input type="number" placeholder="Qty" value={l.quantity || ""} onChange={(e) => setLine(i, { quantity: Number(e.target.value) })} />
-                    <Input type="number" placeholder="Unit price" value={l.unit_price || ""} onChange={(e) => {
-                      const unit_price = Number(e.target.value);
-                      setLine(i, { unit_price, priceEdited: true, pct: impliedPct(l.base, unit_price) });
-                    }} />
-                    <div className="relative">
-                      <Input type="number" placeholder="+/-" className="pr-4 text-right" value={l.pct || ""} onChange={(e) => {
-                        const pct = Number(e.target.value) || 0;
-                        setLine(i, { pct, unit_price: l.base > 0 ? applyPct(l.base, pct) : l.unit_price, priceEdited: true });
-                      }} />
-                      <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Quantity</Label>
+                      <Input type="number" placeholder="Qty" value={l.quantity || ""} onChange={(e) => setLine(i, { quantity: Number(e.target.value) })} />
                     </div>
-                    <div className="grid place-items-center text-xs font-semibold text-muted-foreground">
-                      {money((Number(l.quantity) || 0) * (Number(l.unit_price) || 0))}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Unit price (Rs)</Label>
+                      <Input type="number" placeholder="0" value={l.unit_price || ""} onChange={(e) => {
+                        const unit_price = Number(e.target.value);
+                        setLine(i, { unit_price, priceEdited: true, pct: impliedPct(l.base, unit_price) });
+                      }} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Adjust % (+/−, manual)</Label>
+                      <div className="relative">
+                        <Input type="number" placeholder="0" className="pr-6 text-right" value={l.pct || ""} onChange={(e) => {
+                          const pct = Number(e.target.value) || 0;
+                          setLine(i, { pct, unit_price: l.base > 0 ? applyPct(l.base, pct) : l.unit_price, priceEdited: true });
+                        }} />
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Line total</Label>
+                      <div className="h-9 rounded-md border bg-muted/40 grid place-items-center text-sm font-bold">
+                        {money((Number(l.quantity) || 0) * (Number(l.unit_price) || 0))}
+                      </div>
                     </div>
                   </div>
                   {l.pct !== 0 && l.base > 0 && (
-                    <div className="text-[10px] text-muted-foreground">
+                    <div className="text-[11px] text-muted-foreground">
                       Retail {money(l.base)} {l.pct > 0 ? "+" : ""}{l.pct}% → {money(l.unit_price)}
                     </div>
                   )}

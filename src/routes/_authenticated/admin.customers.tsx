@@ -191,19 +191,19 @@ function CustomersAdmin() {
               createLabel="Add new product"
             />
           </div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1.5"><Label>Qty</Label><Input type="number" value={form.quantity_purchased} onChange={(e) => {
               const qty = Number(e.target.value);
               const p = products.find((x) => x.id === form.product_id);
               setForm({ ...form, quantity_purchased: qty, total_price: p && Number(p.selling_price) > 0 ? applyPct(p.selling_price * qty, form.pct) : form.total_price });
             }} /></div>
-            <div className="space-y-1.5"><Label>Adjust %</Label><Input type="number" placeholder="+/-" value={form.pct || ""} onChange={(e) => {
+            <div className="space-y-1.5"><Label>Adjust % (+/−, manual)</Label><Input type="number" placeholder="0" value={form.pct || ""} onChange={(e) => {
               const pct = Number(e.target.value) || 0;
               const p = products.find((x) => x.id === form.product_id);
               setForm({ ...form, pct, total_price: p && Number(p.selling_price) > 0 ? applyPct(p.selling_price * form.quantity_purchased, pct) : form.total_price });
             }} /></div>
-            <div className="space-y-1.5"><Label>Total</Label><Input type="number" value={form.total_price} onChange={(e) => setForm({ ...form, total_price: Number(e.target.value) })} /></div>
           </div>
+          <div className="space-y-1.5"><Label>Total (Rs)</Label><Input type="number" className="font-semibold" value={form.total_price} onChange={(e) => setForm({ ...form, total_price: Number(e.target.value) })} /></div>
           {form.pct !== 0 && form.product_id && (() => {
             const p = products.find((x) => x.id === form.product_id);
             return p && Number(p.selling_price) > 0 ? (
