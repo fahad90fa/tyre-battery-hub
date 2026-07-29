@@ -20,6 +20,7 @@ function DailyClosing() {
   const [sales, setSales] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [ledgerPays, setLedgerPays] = useState<any[]>([]);
+  const [merchantPays, setMerchantPays] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [closing, setClosing] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
@@ -28,15 +29,16 @@ function DailyClosing() {
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
-    const [{ data: s }, { data: ip }, { data: lp }, { data: ex }, { data: cl }, { data: hist }] = await Promise.all([
+    const [{ data: s }, { data: ip }, { data: lp }, { data: mp }, { data: ex }, { data: cl }, { data: hist }] = await Promise.all([
       supabase.from("customer_purchases").select("*, products(product_name)").eq("purchase_date", date).order("created_at"),
       supabase.from("invoice_payments").select("*, invoices(invoice_id, customer_name, created_at)").eq("payment_date", date),
       supabase.from("client_ledger").select("*, clients(name)").eq("entry_type", "payment").eq("entry_date", date),
+      supabase.from("merchant_ledger").select("*, merchants(name)").eq("entry_type", "payment").eq("entry_date", date),
       supabase.from("expenses").select("*").eq("date_of_expense", date),
       supabase.from("daily_closings").select("*").eq("closing_date", date).maybeSingle(),
       supabase.from("daily_closings").select("*").order("closing_date", { ascending: false }).limit(14),
     ]);
-    setSales(s ?? []); setPayments(ip ?? []); setLedgerPays(lp ?? []); setExpenses(ex ?? []);
+    setSales(s ?? []); setPayments(ip ?? []); setLedgerPays(lp ?? []); setMerchantPays(mp ?? []); setExpenses(ex ?? []);
     setClosing(cl ?? null); setHistory(hist ?? []);
     setCashInHand(cl?.cash_in_hand != null ? String(cl.cash_in_hand) : "");
     setNotes(cl?.notes ?? "");
@@ -59,11 +61,13 @@ function DailyClosing() {
     const byMethod: Record<string, number> = {};
     allIn.forEach((r) => { byMethod[r.method] = (byMethod[r.method] ?? 0) + r.amount; });
     const totalExpenses = expenses.reduce((a, e) => a + Number(e.amount), 0);
+    const merchantOut = merchantPays.reduce((a, m) => a + Number(m.amount), 0);
     return {
       netSales, cashSales, creditSales, recoveries, totalCashIn,
-      totalExpenses, netCash: totalCashIn - totalExpenses, byMethod, allIn,
+      totalExpenses, merchantOut,
+      netCash: totalCashIn - totalExpenses - merchantOut, byMethod, allIn,
     };
-  }, [sales, payments, ledgerPays, expenses, date]);
+  }, [sales, payments, ledgerPays, merchantPays, expenses, date]);
 
   const closeDay = async () => {
     setSaving(true);
@@ -72,6 +76,7 @@ function DailyClosing() {
         closing_date: date,
         net_sales: t.netSales, cash_sales: t.cashSales, credit_sales: t.creditSales,
         recoveries: t.recoveries, total_cash_in: t.totalCashIn,
+        merchant_payments: t.merchantOut,
         expenses: t.totalExpenses, net_cash: t.netCash,
         cash_in_hand: cashInHand === "" ? null : Number(cashInHand),
         notes: notes || null,
@@ -110,8 +115,9 @@ function DailyClosing() {
           <Kpi icon={CreditCard} label="Credit (udhar) sales" value={money(t.creditSales)} accent={t.creditSales > 0} />
           <Kpi icon={HandCoins} label="Recoveries (old udhar)" value={money(t.recoveries)} green />
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <Kpi icon={Wallet} label="Total cash in" value={money(t.totalCashIn)} green />
+          <Kpi icon={TrendingDown} label="Merchant payments" value={money(t.merchantOut)} accent={t.merchantOut > 0} />
           <Kpi icon={TrendingDown} label="Expenses" value={money(t.totalExpenses)} accent={t.totalExpenses > 0} />
           <Kpi icon={Wallet} label="Net cash (in − out)" value={money(t.netCash)} green={t.netCash >= 0} accent={t.netCash < 0} />
           <div className="rounded-2xl bg-card p-4 shadow-sm">
@@ -128,7 +134,7 @@ function DailyClosing() {
           </div>
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-4">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <Card title={`Sales (${sales.length})`}>
             {sales.length === 0 ? <Empty /> : sales.map((s) => (
               <Row key={s.id}
@@ -141,6 +147,13 @@ function DailyClosing() {
               <Row key={i}
                    left={<>{p.who ?? "Walk-in"}<div className="text-[10px] text-muted-foreground">{methodLabel(p.method)}{p.ref ? ` · ${p.ref}` : ""}{p.isRecovery ? " · recovery" : ""}</div></>}
                    right={<span className="text-green-600">{money(p.amount)}</span>} />
+            ))}
+          </Card>
+          <Card title={`Merchant payments (${merchantPays.length})`}>
+            {merchantPays.length === 0 ? <Empty /> : merchantPays.map((m) => (
+              <Row key={m.id}
+                   left={<>{m.merchants?.name ?? "Merchant"}<div className="text-[10px] text-muted-foreground">{methodLabel(m.method ?? "cash")}{m.reference ? ` · ${m.reference}` : ""}</div></>}
+                   right={<span className="text-orange-500">−{money(m.amount)}</span>} />
             ))}
           </Card>
           <Card title={`Expenses (${expenses.length})`}>

@@ -253,7 +253,7 @@ function PosPage() {
                         <Input type="number" className="h-9 pr-6 text-right" placeholder="0" value={l.pct || ""}
                                onChange={(e) => {
                                  const pct = Number(e.target.value);
-                                 setCartLine(i, { pct, price: applyPct(l.base, pct) });
+                                 setCartLine(i, { pct, price: l.base > 0 ? applyPct(l.base, pct) : l.price });
                                }} />
                         <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
                       </div>

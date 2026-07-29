@@ -306,6 +306,7 @@ create table public.daily_closings (
   credit_sales numeric not null default 0,
   recoveries numeric not null default 0,
   total_cash_in numeric not null default 0,
+  merchant_payments numeric not null default 0,
   expenses numeric not null default 0,
   net_cash numeric not null default 0,
   cash_in_hand numeric,

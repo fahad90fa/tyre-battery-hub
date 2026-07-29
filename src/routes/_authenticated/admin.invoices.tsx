@@ -24,6 +24,7 @@ function InvoicesAdmin() {
   const [open, setOpen] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
   const [tab, setTab] = useState("all");
+  const [dateFilter, setDateFilter] = useState("");
   const [payForm, setPayForm] = useState({ method: "cash", amount: 0 });
 
   const load = async () => {
@@ -44,11 +45,13 @@ function InvoicesAdmin() {
   const isOverdue = (inv: any) => balanceOf(inv) > 0 && inv.due_date && inv.due_date < today;
 
   const filtered = useMemo(() => {
-    if (tab === "outstanding") return rows.filter((r) => balanceOf(r) > 0);
-    if (tab === "overdue") return rows.filter(isOverdue);
-    return rows;
+    let list = rows;
+    if (dateFilter) list = list.filter((r) => (r.created_at ?? "").slice(0, 10) === dateFilter);
+    if (tab === "outstanding") return list.filter((r) => balanceOf(r) > 0);
+    if (tab === "overdue") return list.filter(isOverdue);
+    return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, payments, tab]);
+  }, [rows, payments, tab, dateFilter]);
 
   const totals = useMemo(() => ({
     outstanding: rows.reduce((a, r) => a + balanceOf(r), 0),
@@ -110,8 +113,14 @@ function InvoicesAdmin() {
             <TabsTrigger value="overdue">Overdue{totals.overdueCount > 0 ? ` (${totals.overdueCount})` : ""}</TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="text-sm">
-          Total receivable: <b className={totals.outstanding > 0 ? "text-orange-500" : "text-green-600"}>{money(totals.outstanding)}</b>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="w-40" />
+          {dateFilter && (
+            <Button variant="ghost" size="sm" onClick={() => setDateFilter("")}>All dates</Button>
+          )}
+          <div className="text-sm ml-2">
+            Total receivable: <b className={totals.outstanding > 0 ? "text-orange-500" : "text-green-600"}>{money(totals.outstanding)}</b>
+          </div>
         </div>
       </div>
 
