@@ -24,6 +24,7 @@ import { Route as AuthenticatedAdminUsersRouteImport } from './routes/_authentic
 import { Route as AuthenticatedAdminTemplatesRouteImport } from './routes/_authenticated/admin.templates'
 import { Route as AuthenticatedAdminStockRouteImport } from './routes/_authenticated/admin.stock'
 import { Route as AuthenticatedAdminReportsRouteImport } from './routes/_authenticated/admin.reports'
+import { Route as AuthenticatedAdminRecoveriesRouteImport } from './routes/_authenticated/admin.recoveries'
 import { Route as AuthenticatedAdminQuotationsRouteImport } from './routes/_authenticated/admin.quotations'
 import { Route as AuthenticatedAdminProfileRouteImport } from './routes/_authenticated/admin.profile'
 import { Route as AuthenticatedAdminProductsRouteImport } from './routes/_authenticated/admin.products'
@@ -113,6 +114,12 @@ const AuthenticatedAdminReportsRoute =
   AuthenticatedAdminReportsRouteImport.update({
     id: '/reports',
     path: '/reports',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
+const AuthenticatedAdminRecoveriesRoute =
+  AuthenticatedAdminRecoveriesRouteImport.update({
+    id: '/recoveries',
+    path: '/recoveries',
     getParentRoute: () => AuthenticatedAdminRoute,
   } as any)
 const AuthenticatedAdminQuotationsRoute =
@@ -222,6 +229,7 @@ export interface FileRoutesByFullPath {
   '/admin/products': typeof AuthenticatedAdminProductsRoute
   '/admin/profile': typeof AuthenticatedAdminProfileRoute
   '/admin/quotations': typeof AuthenticatedAdminQuotationsRoute
+  '/admin/recoveries': typeof AuthenticatedAdminRecoveriesRoute
   '/admin/reports': typeof AuthenticatedAdminReportsRoute
   '/admin/stock': typeof AuthenticatedAdminStockRoute
   '/admin/templates': typeof AuthenticatedAdminTemplatesRoute
@@ -251,6 +259,7 @@ export interface FileRoutesByTo {
   '/admin/products': typeof AuthenticatedAdminProductsRoute
   '/admin/profile': typeof AuthenticatedAdminProfileRoute
   '/admin/quotations': typeof AuthenticatedAdminQuotationsRoute
+  '/admin/recoveries': typeof AuthenticatedAdminRecoveriesRoute
   '/admin/reports': typeof AuthenticatedAdminReportsRoute
   '/admin/stock': typeof AuthenticatedAdminStockRoute
   '/admin/templates': typeof AuthenticatedAdminTemplatesRoute
@@ -283,6 +292,7 @@ export interface FileRoutesById {
   '/_authenticated/admin/products': typeof AuthenticatedAdminProductsRoute
   '/_authenticated/admin/profile': typeof AuthenticatedAdminProfileRoute
   '/_authenticated/admin/quotations': typeof AuthenticatedAdminQuotationsRoute
+  '/_authenticated/admin/recoveries': typeof AuthenticatedAdminRecoveriesRoute
   '/_authenticated/admin/reports': typeof AuthenticatedAdminReportsRoute
   '/_authenticated/admin/stock': typeof AuthenticatedAdminStockRoute
   '/_authenticated/admin/templates': typeof AuthenticatedAdminTemplatesRoute
@@ -315,6 +325,7 @@ export interface FileRouteTypes {
     | '/admin/products'
     | '/admin/profile'
     | '/admin/quotations'
+    | '/admin/recoveries'
     | '/admin/reports'
     | '/admin/stock'
     | '/admin/templates'
@@ -344,6 +355,7 @@ export interface FileRouteTypes {
     | '/admin/products'
     | '/admin/profile'
     | '/admin/quotations'
+    | '/admin/recoveries'
     | '/admin/reports'
     | '/admin/stock'
     | '/admin/templates'
@@ -375,6 +387,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin/products'
     | '/_authenticated/admin/profile'
     | '/_authenticated/admin/quotations'
+    | '/_authenticated/admin/recoveries'
     | '/_authenticated/admin/reports'
     | '/_authenticated/admin/stock'
     | '/_authenticated/admin/templates'
@@ -500,6 +513,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminReportsRouteImport
       parentRoute: typeof AuthenticatedAdminRoute
     }
+    '/_authenticated/admin/recoveries': {
+      id: '/_authenticated/admin/recoveries'
+      path: '/recoveries'
+      fullPath: '/admin/recoveries'
+      preLoaderRoute: typeof AuthenticatedAdminRecoveriesRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
     '/_authenticated/admin/quotations': {
       id: '/_authenticated/admin/quotations'
       path: '/quotations'
@@ -616,6 +636,7 @@ interface AuthenticatedAdminRouteChildren {
   AuthenticatedAdminProductsRoute: typeof AuthenticatedAdminProductsRoute
   AuthenticatedAdminProfileRoute: typeof AuthenticatedAdminProfileRoute
   AuthenticatedAdminQuotationsRoute: typeof AuthenticatedAdminQuotationsRoute
+  AuthenticatedAdminRecoveriesRoute: typeof AuthenticatedAdminRecoveriesRoute
   AuthenticatedAdminReportsRoute: typeof AuthenticatedAdminReportsRoute
   AuthenticatedAdminStockRoute: typeof AuthenticatedAdminStockRoute
   AuthenticatedAdminTemplatesRoute: typeof AuthenticatedAdminTemplatesRoute
@@ -638,6 +659,7 @@ const AuthenticatedAdminRouteChildren: AuthenticatedAdminRouteChildren = {
   AuthenticatedAdminProductsRoute: AuthenticatedAdminProductsRoute,
   AuthenticatedAdminProfileRoute: AuthenticatedAdminProfileRoute,
   AuthenticatedAdminQuotationsRoute: AuthenticatedAdminQuotationsRoute,
+  AuthenticatedAdminRecoveriesRoute: AuthenticatedAdminRecoveriesRoute,
   AuthenticatedAdminReportsRoute: AuthenticatedAdminReportsRoute,
   AuthenticatedAdminStockRoute: AuthenticatedAdminStockRoute,
   AuthenticatedAdminTemplatesRoute: AuthenticatedAdminTemplatesRoute,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate } from "@/lib/format";
+import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel } from "@/lib/payments";
 import { InvoiceQuickView } from "@/components/admin/InvoiceQuickView";
 import { PurchaseQuickView } from "@/components/admin/PurchaseQuickView";
@@ -58,7 +58,7 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
     const { data } = await supabase.from(kind).select("*").order("name");
     setRows(data ?? []);
     if (kind === "clients") {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localToday();
       const { data: inv } = await supabase.from("invoices")
         .select("client_id, due_date, payment_status")
         .neq("payment_status", "paid").not("client_id", "is", null);
@@ -220,6 +220,40 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
   };
   useEffect(() => { load(); }, [party.id]);
 
+  // When a customer pays into their account, spread the amount over their
+  // outstanding invoices (oldest first) so invoice statuses flip to
+  // paid/partial automatically — no manual status changes needed.
+  const allocateToInvoices = async (amount: number, method: string) => {
+    const { data: invs } = await supabase.from("invoices")
+      .select("id, invoice_id, total_amount, payment_status, created_at")
+      .eq("client_id", party.id).neq("payment_status", "paid")
+      .order("created_at");
+    if (!invs?.length) return 0;
+    const ids = invs.map((i) => i.id);
+    const { data: pays } = await supabase.from("invoice_payments").select("invoice_id, amount").in("invoice_id", ids);
+    let remaining = amount;
+    let touched = 0;
+    for (const inv of invs) {
+      if (remaining <= 0) break;
+      const paid = (pays ?? []).filter((x) => x.invoice_id === inv.id).reduce((a, x) => a + Number(x.amount), 0);
+      const bal = Number(inv.total_amount) - paid;
+      if (bal <= 0) {
+        await supabase.from("invoices").update({ payment_status: "paid" }).eq("id", inv.id);
+        continue;
+      }
+      const alloc = Math.min(bal, remaining);
+      const { error: payErr } = await supabase.from("invoice_payments").insert({
+        invoice_id: inv.id, amount: alloc, method, payment_date: localToday(),
+        note: "Auto-allocated from account payment",
+      });
+      if (payErr) { toast.error(payErr.message); break; }
+      await supabase.from("invoices").update({ payment_status: alloc >= bal ? "paid" : "partial" }).eq("id", inv.id);
+      remaining -= alloc;
+      touched++;
+    }
+    return touched;
+  };
+
   const add = async () => {
     if (!form.amount || Number(form.amount) <= 0) return toast.error("Amount required");
     const isPayment = form.entry_type === "payment";
@@ -227,9 +261,14 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
       entry_type: form.entry_type, amount: Number(form.amount),
       method: isPayment ? form.method : null,
       reference: form.reference, note: form.note,
+      entry_date: localToday(),
       [FK[kind]]: party.id,
     });
     if (error) return toast.error(error.message);
+    if (kind === "clients" && isPayment) {
+      const touched = await allocateToInvoices(Number(form.amount), form.method);
+      if (touched > 0) toast.success(`Payment applied to ${touched} invoice${touched > 1 ? "s" : ""} automatically`);
+    }
     setForm({ entry_type: TYPES[kind][0].value, amount: 0, method: "cash", reference: "", note: "" });
     toast.success("Entry added"); load(); onChanged();
   };
@@ -253,7 +292,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
 
   const totalUp = entries.filter((e) => INCREASES[kind].includes(e.entry_type)).reduce((a, e) => a + Number(e.amount), 0);
   const totalDown = entries.filter((e) => !INCREASES[kind].includes(e.entry_type)).reduce((a, e) => a + Number(e.amount), 0);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const isPaymentType = form.entry_type === "payment";
 
   return (
@@ -337,7 +376,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
                     className={`border-t ${clickable ? "cursor-pointer hover:bg-muted/50" : ""}`}
                     onClick={() => { if (hasInvoice) setViewInvoice(e.reference); if (hasPurchase) setViewPurchase(e.reference); }}
                     title={clickable ? "Open full details" : undefined}>
-                  <td className="p-2 whitespace-nowrap">{shortDate(e.entry_date)}</td>
+                  <td className="p-2 whitespace-nowrap">{shortDate(e.entry_date ?? e.created_at)}</td>
                   <td className="p-2">
                     <span className={up ? "text-orange-500" : "text-green-600"}>{e.entry_type}</span>
                     {e.note && <div className="text-[10px] text-muted-foreground">{e.note}</div>}

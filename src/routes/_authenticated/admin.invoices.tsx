@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate } from "@/lib/format";
+import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, paymentStatus } from "@/lib/payments";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,7 @@ function InvoicesAdmin() {
   const [open, setOpen] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
   const [tab, setTab] = useState("all");
+  const [dateFilter, setDateFilter] = useState("");
   const [payForm, setPayForm] = useState({ method: "cash", amount: 0 });
 
   const load = async () => {
@@ -40,15 +41,17 @@ function InvoicesAdmin() {
 
   const paidOf = (inv: any) => (payments[inv.id] ?? []).reduce((a, p) => a + Number(p.amount), 0);
   const balanceOf = (inv: any) => Math.max(0, Number(inv.total_amount) - paidOf(inv));
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const isOverdue = (inv: any) => balanceOf(inv) > 0 && inv.due_date && inv.due_date < today;
 
   const filtered = useMemo(() => {
-    if (tab === "outstanding") return rows.filter((r) => balanceOf(r) > 0);
-    if (tab === "overdue") return rows.filter(isOverdue);
-    return rows;
+    let list = rows;
+    if (dateFilter) list = list.filter((r) => (r.created_at ?? "").slice(0, 10) === dateFilter);
+    if (tab === "outstanding") return list.filter((r) => balanceOf(r) > 0);
+    if (tab === "overdue") return list.filter(isOverdue);
+    return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, payments, tab]);
+  }, [rows, payments, tab, dateFilter]);
 
   const totals = useMemo(() => ({
     outstanding: rows.reduce((a, r) => a + balanceOf(r), 0),
@@ -74,7 +77,7 @@ function InvoicesAdmin() {
     if (amount > balance) return toast.error(`Amount exceeds balance (${money(balance)})`);
 
     const { error } = await supabase.from("invoice_payments").insert({
-      invoice_id: open.id, amount, method: payForm.method,
+      invoice_id: open.id, amount, method: payForm.method, payment_date: localToday(),
     });
     if (error) return toast.error(error.message);
 
@@ -85,7 +88,7 @@ function InvoicesAdmin() {
       await supabase.from("client_ledger").insert({
         client_id: open.client_id, entry_type: "payment", amount,
         method: payForm.method, reference: open.invoice_id,
-        note: `Recovery (${methodLabel(payForm.method)})`,
+        note: `Recovery (${methodLabel(payForm.method)})`, entry_date: localToday(),
       });
     }
     toast.success(`Payment of ${money(amount)} recorded`);
@@ -110,8 +113,14 @@ function InvoicesAdmin() {
             <TabsTrigger value="overdue">Overdue{totals.overdueCount > 0 ? ` (${totals.overdueCount})` : ""}</TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="text-sm">
-          Total receivable: <b className={totals.outstanding > 0 ? "text-orange-500" : "text-green-600"}>{money(totals.outstanding)}</b>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="w-40" />
+          {dateFilter && (
+            <Button variant="ghost" size="sm" onClick={() => setDateFilter("")}>All dates</Button>
+          )}
+          <div className="text-sm ml-2">
+            Total receivable: <b className={totals.outstanding > 0 ? "text-orange-500" : "text-green-600"}>{money(totals.outstanding)}</b>
+          </div>
         </div>
       </div>
 

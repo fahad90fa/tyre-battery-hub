@@ -216,6 +216,7 @@ export type Database = {
           credit_sales: number
           expenses: number
           id: string
+          merchant_payments: number
           net_cash: number
           net_sales: number
           notes: string | null
@@ -231,6 +232,7 @@ export type Database = {
           credit_sales?: number
           expenses?: number
           id?: string
+          merchant_payments?: number
           net_cash?: number
           net_sales?: number
           notes?: string | null
@@ -246,6 +248,7 @@ export type Database = {
           credit_sales?: number
           expenses?: number
           id?: string
+          merchant_payments?: number
           net_cash?: number
           net_sales?: number
           notes?: string | null

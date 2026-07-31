@@ -4,7 +4,7 @@ export const PAYMENT_METHODS = [
   { value: "easypaisa", label: "Easypaisa" },
   { value: "bank", label: "Bank transfer" },
   { value: "card", label: "Card" },
-  { value: "other", label: "Other" },
+  { value: "scrap", label: "Scrap" },
 ] as const;
 
 export const methodLabel = (v: string | null | undefined) =>

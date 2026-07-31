@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate } from "@/lib/format";
+import { money, shortDate, localToday } from "@/lib/format";
 import { Letterhead } from "@/components/admin/Letterhead";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { applyPct, impliedPct } from "@/lib/pricing";
@@ -193,7 +193,7 @@ function QuotationsAdmin() {
     if (viewing.client_id) {
       const { error: ledErr } = await supabase.from("client_ledger").insert({
         client_id: viewing.client_id, entry_type: "sale", amount: Number(viewing.total_amount),
-        reference: invId, note: `From quotation ${viewing.quote_no}`,
+        reference: invId, note: `From quotation ${viewing.quote_no}`, entry_date: localToday(),
       });
       if (ledErr) toast.error(`Invoice created but ledger entry failed: ${ledErr.message}`);
     }

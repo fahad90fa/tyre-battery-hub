@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate } from "@/lib/format";
+import { money, shortDate, localToday } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,7 +25,7 @@ function StockAdmin() {
   const [merchants, setMerchants] = useState<any[]>([]);
   const [merchantId, setMerchantId] = useState("");
   const [supplierName, setSupplierName] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => localToday());
   const [lines, setLines] = useState<PurchaseLine[]>([emptyLine()]);
   const [saving, setSaving] = useState(false);
 
@@ -108,7 +108,7 @@ function StockAdmin() {
 
       toast.success(`Purchase of ${valid.length} item${valid.length > 1 ? "s" : ""} (${money(validTotal)}) recorded`);
       setLines([emptyLine()]); setSupplierName(""); setMerchantId("");
-      setDate(new Date().toISOString().slice(0, 10));
+      setDate(localToday());
       load();
     } finally {
       setSaving(false);
@@ -231,7 +231,7 @@ function StockAdmin() {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className="border-t">
-                  <td className="p-3 whitespace-nowrap">{shortDate(r.date)}</td>
+                  <td className="p-3 whitespace-nowrap">{shortDate(r.date ?? r.created_at)}</td>
                   <td className="p-3 font-mono text-xs text-muted-foreground">{r.reference ?? "—"}</td>
                   <td className="p-3">{r.supplier_name}</td>
                   <td className="p-3">{r.products?.product_name ?? "—"}</td>
