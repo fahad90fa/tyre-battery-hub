@@ -8,3 +8,10 @@ export const shortDate = (s: string | Date | null | undefined) => {
   const d = typeof s === "string" ? new Date(s) : s;
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 };
+
+/** Today's date in the DEVICE's local timezone (YYYY-MM-DD) — never UTC.
+ *  Using toISOString() shifted dates before 5 AM Pakistan time. */
+export const localToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};

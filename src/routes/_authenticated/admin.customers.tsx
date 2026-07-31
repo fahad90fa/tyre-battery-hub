@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate } from "@/lib/format";
+import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
 import { applyPct } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
@@ -75,6 +75,7 @@ function CustomersAdmin() {
         cost_price: prod?.purchase_price ?? null,
         payment_method: summarizeMethods(activeLines.map((l) => l.method)),
         payment_status: status,
+        purchase_date: localToday(),
         payment_due_date: remaining > 0 && form.due_date ? form.due_date : null,
       });
       if (error) return toast.error(error.message);
@@ -104,7 +105,7 @@ function CustomersAdmin() {
         });
         if (activeLines.length > 0) {
           await supabase.from("invoice_payments").insert(
-            activeLines.map((l) => ({ invoice_id: inv.id, amount: Number(l.amount), method: l.method })),
+            activeLines.map((l) => ({ invoice_id: inv.id, amount: Number(l.amount), method: l.method, payment_date: localToday() })),
           );
         }
       }
@@ -112,13 +113,14 @@ function CustomersAdmin() {
       if (form.client_id) {
         await supabase.from("client_ledger").insert({
           client_id: form.client_id, entry_type: "sale", amount: total,
-          reference: invId, note: `${prod?.product_name ?? ""} × ${qty}`,
+          reference: invId, note: `${prod?.product_name ?? ""} × ${qty}`, entry_date: localToday(),
         });
         if (activeLines.length > 0) {
           await supabase.from("client_ledger").insert(
             activeLines.map((l) => ({
               client_id: form.client_id, entry_type: "payment", amount: Number(l.amount),
               method: l.method, reference: invId, note: `Paid at sale (${methodLabel(l.method)})`,
+              entry_date: localToday(),
             })),
           );
         }
@@ -281,7 +283,7 @@ function CustomersAdmin() {
 }
 
 function SalesTable({ rows }: { rows: any[] }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   return (
     <div className="rounded-2xl bg-card shadow-sm overflow-x-auto mt-3">
       <table className="w-full min-w-[640px] text-sm">

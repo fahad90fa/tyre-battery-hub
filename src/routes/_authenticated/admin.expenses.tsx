@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate } from "@/lib/format";
+import { money, shortDate, localToday } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/_authenticated/admin/expenses")({
 
 function ExpensesAdmin() {
   const [rows, setRows] = useState<any[]>([]);
-  const [form, setForm] = useState({ expense_type: "", amount: 0, notes: "", date: new Date().toISOString().slice(0, 10) });
+  const [form, setForm] = useState({ expense_type: "", amount: 0, notes: "", date: localToday() });
 
   const load = async () => {
     const { data } = await supabase.from("expenses").select("*")
@@ -51,7 +51,7 @@ function ExpensesAdmin() {
     return [...map.entries()];
   }, [rows]);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const total = rows.reduce((s, r) => s + Number(r.amount), 0);
   const todayTotal = rows.filter((r) => r.date_of_expense === today).reduce((s, r) => s + Number(r.amount), 0);
 

@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate } from "@/lib/format";
+import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, paymentStatus } from "@/lib/payments";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,7 +41,7 @@ function InvoicesAdmin() {
 
   const paidOf = (inv: any) => (payments[inv.id] ?? []).reduce((a, p) => a + Number(p.amount), 0);
   const balanceOf = (inv: any) => Math.max(0, Number(inv.total_amount) - paidOf(inv));
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const isOverdue = (inv: any) => balanceOf(inv) > 0 && inv.due_date && inv.due_date < today;
 
   const filtered = useMemo(() => {
@@ -77,7 +77,7 @@ function InvoicesAdmin() {
     if (amount > balance) return toast.error(`Amount exceeds balance (${money(balance)})`);
 
     const { error } = await supabase.from("invoice_payments").insert({
-      invoice_id: open.id, amount, method: payForm.method,
+      invoice_id: open.id, amount, method: payForm.method, payment_date: localToday(),
     });
     if (error) return toast.error(error.message);
 
@@ -88,7 +88,7 @@ function InvoicesAdmin() {
       await supabase.from("client_ledger").insert({
         client_id: open.client_id, entry_type: "payment", amount,
         method: payForm.method, reference: open.invoice_id,
-        note: `Recovery (${methodLabel(payForm.method)})`,
+        note: `Recovery (${methodLabel(payForm.method)})`, entry_date: localToday(),
       });
     }
     toast.success(`Payment of ${money(amount)} recorded`);

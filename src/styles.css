@@ -144,6 +144,10 @@
    the document paginates naturally (no absolute positioning, no clipping,
    no scattered fragments in the PDF). */
 @media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
   body:has(.print-area) *:not(.print-area):not(.print-area *):not(:has(.print-area)) {
     display: none !important;
   }

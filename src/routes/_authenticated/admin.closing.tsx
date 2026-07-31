@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate } from "@/lib/format";
+import { money, shortDate, localToday } from "@/lib/format";
 import { methodLabel } from "@/lib/payments";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,13 +16,14 @@ export const Route = createFileRoute("/_authenticated/admin/closing")({
 });
 
 function DailyClosing() {
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => localToday());
   const [sales, setSales] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [ledgerPays, setLedgerPays] = useState<any[]>([]);
   const [merchantPays, setMerchantPays] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [closing, setClosing] = useState<any>(null);
+  const [refMap, setRefMap] = useState<Record<string, string>>({});
   const [history, setHistory] = useState<any[]>([]);
   const [cashInHand, setCashInHand] = useState("");
   const [notes, setNotes] = useState("");
@@ -40,6 +41,12 @@ function DailyClosing() {
     ]);
     setSales(s ?? []); setPayments(ip ?? []); setLedgerPays(lp ?? []); setMerchantPays(mp ?? []); setExpenses(ex ?? []);
     setClosing(cl ?? null); setHistory(hist ?? []);
+    // invoice dates for ledger references, to tell same-day sale payments from recoveries
+    const refs = [...new Set((lp ?? []).map((l: any) => l.reference).filter((r: any) => typeof r === "string" && r.startsWith("INV-")))];
+    if (refs.length) {
+      const { data: refInvs } = await supabase.from("invoices").select("invoice_id, created_at").in("invoice_id", refs);
+      setRefMap(Object.fromEntries((refInvs ?? []).map((i) => [i.invoice_id, (i.created_at ?? "").slice(0, 10)])));
+    } else setRefMap({});
     setCashInHand(cl?.cash_in_hand != null ? String(cl.cash_in_hand) : "");
     setNotes(cl?.notes ?? "");
   };
@@ -50,11 +57,17 @@ function DailyClosing() {
     const cashSales = sales.filter((s) => s.payment_status === "paid").reduce((a, s) => a + Number(s.total_price), 0);
     const creditSales = netSales - cashSales;
 
-    // Manual khaata payments that don't belong to an invoice payment row.
-    const manualPays = ledgerPays.filter((l) => !l.reference || !String(l.reference).startsWith("INV-"));
+    // Money in = every account (ledger) payment + walk-in invoice payments.
+    // Account customers' invoice_payments rows are allocation records only —
+    // counting them too would double-count the same rupees.
+    const walkInPays = payments.filter((p) => !p.invoices?.client_id);
     const allIn = [
-      ...payments.map((p) => ({ amount: Number(p.amount), method: p.method as string, who: p.invoices?.customer_name, ref: p.invoices?.invoice_id, isRecovery: (p.invoices?.created_at ?? "").slice(0, 10) !== date })),
-      ...manualPays.map((l) => ({ amount: Number(l.amount), method: (l.method ?? "cash") as string, who: l.clients?.name, ref: l.reference, isRecovery: true })),
+      ...walkInPays.map((p) => ({ amount: Number(p.amount), method: p.method as string, who: p.invoices?.customer_name ?? "Walk-in", ref: p.invoices?.invoice_id, isRecovery: (p.invoices?.created_at ?? "").slice(0, 10) !== date })),
+      ...ledgerPays.map((l) => {
+        const ref = typeof l.reference === "string" && l.reference.startsWith("INV-") ? l.reference : null;
+        const saleDay = ref ? refMap[ref] : undefined;
+        return { amount: Number(l.amount), method: (l.method ?? "cash") as string, who: l.clients?.name, ref: l.reference, isRecovery: !(saleDay && saleDay === date) };
+      }),
     ];
     const totalCashIn = allIn.reduce((a, r) => a + r.amount, 0);
     const recoveries = allIn.filter((r) => r.isRecovery).reduce((a, r) => a + r.amount, 0);
@@ -67,7 +80,7 @@ function DailyClosing() {
       totalExpenses, merchantOut,
       netCash: totalCashIn - totalExpenses - merchantOut, byMethod, allIn,
     };
-  }, [sales, payments, ledgerPays, merchantPays, expenses, date]);
+  }, [sales, payments, ledgerPays, merchantPays, expenses, refMap, date]);
 
   const closeDay = async () => {
     setSaving(true);

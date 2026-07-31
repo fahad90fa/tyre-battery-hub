@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money } from "@/lib/format";
+import { money, localToday } from "@/lib/format";
 import { methodLabel } from "@/lib/payments";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -45,7 +45,7 @@ function Dashboard() {
 
   useEffect(() => {
     (async () => {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = localToday();
       const [
         { data: products },
         { data: sales },

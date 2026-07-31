@@ -94,7 +94,7 @@ create table public.expenses (
   expense_type text,
   notes text,
   id uuid primary key default gen_random_uuid(),
-  date_of_expense date
+  date_of_expense date default current_date
 );
 
 create table public.stock_purchases (

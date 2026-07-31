@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money } from "@/lib/format";
+import { money, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
 import { applyPct, impliedPct } from "@/lib/pricing";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
@@ -126,7 +126,7 @@ function PosPage() {
 
       if (activePays.length > 0 && total > 0) {
         await supabase.from("invoice_payments").insert(
-          activePays.map((l) => ({ invoice_id: inv.id, amount: Number(l.amount), method: l.method })),
+          activePays.map((l) => ({ invoice_id: inv.id, amount: Number(l.amount), method: l.method, payment_date: localToday() })),
         );
       }
 
@@ -148,6 +148,7 @@ function PosPage() {
         customer_name: name, product_id: l.product_id,
         quantity_purchased: l.qty, total_price: l.qty * l.price,
         cost_price: l.cost, payment_method: methodSummary, payment_status: status,
+        purchase_date: localToday(),
         payment_due_date: remaining > 0 && dueDate ? dueDate : null,
       })));
 
@@ -155,12 +156,14 @@ function PosPage() {
         await supabase.from("client_ledger").insert({
           client_id: clientId, entry_type: "sale", amount: total,
           reference: invId, note: cart.map((l) => `${l.name} × ${l.qty}`).join("; "),
+          entry_date: localToday(),
         });
         if (activePays.length > 0) {
           await supabase.from("client_ledger").insert(
             activePays.map((l) => ({
               client_id: clientId, entry_type: "payment", amount: Number(l.amount),
               method: l.method, reference: invId, note: `Paid at sale (${methodLabel(l.method)})`,
+              entry_date: localToday(),
             })),
           );
         }

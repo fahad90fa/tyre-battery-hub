@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate } from "@/lib/format";
+import { money, shortDate, localToday } from "@/lib/format";
 import { methodLabel } from "@/lib/payments";
 import { HandCoins, Store, TrendingDown, Wallet, CalendarDays } from "lucide-react";
 
@@ -24,23 +24,31 @@ function Recoveries() {
   const [ledgerPays, setLedgerPays] = useState<any[]>([]);
   const [merchantPays, setMerchantPays] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
+  const [invDateMap, setInvDateMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     (async () => {
       const [{ data: ip }, { data: lp }, { data: mp }, { data: ex }] = await Promise.all([
-        supabase.from("invoice_payments").select("*, invoices(invoice_id, customer_name, created_at)").order("payment_date", { ascending: false }),
+        supabase.from("invoice_payments").select("*, invoices(invoice_id, customer_name, created_at, client_id)").order("payment_date", { ascending: false }),
         supabase.from("client_ledger").select("*, clients(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
         supabase.from("merchant_ledger").select("*, merchants(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
         supabase.from("expenses").select("*").order("date_of_expense", { ascending: false }),
       ]);
       setInvPays(ip ?? []); setLedgerPays(lp ?? []); setMerchantPays(mp ?? []); setExpenses(ex ?? []);
+      const refs = [...new Set((lp ?? []).map((l: any) => l.reference).filter((r: any) => typeof r === "string" && r.startsWith("INV-")))];
+      if (refs.length) {
+        const { data: refInvs } = await supabase.from("invoices").select("invoice_id, created_at").in("invoice_id", refs);
+        setInvDateMap(Object.fromEntries((refInvs ?? []).map((i) => [i.invoice_id, (i.created_at ?? "").slice(0, 10)])));
+      }
     })();
   }, []);
 
   const flows: Flow[] = useMemo(() => {
     const out: Flow[] = [];
     // Money in from invoices: same-day sale payments vs recoveries of old udhar.
-    invPays.forEach((p) => {
+    // Walk-in invoice payments only — account customers are counted via
+    // their ledger, so allocation rows against their invoices are skipped.
+    invPays.filter((p) => !p.invoices?.client_id).forEach((p) => {
       const saleDay = (p.invoices?.created_at ?? "").slice(0, 10);
       const isRecovery = saleDay && saleDay !== p.payment_date;
       out.push({
@@ -51,16 +59,18 @@ function Recoveries() {
         amount: Number(p.amount),
       });
     });
-    // Manual khaata recoveries recorded directly in a customer ledger.
-    ledgerPays
-      .filter((l) => !l.reference || !String(l.reference).startsWith("INV-"))
-      .forEach((l) => out.push({
+    // Every account (ledger) payment; same-day sale payments vs recoveries.
+    ledgerPays.forEach((l) => {
+      const ref = typeof l.reference === "string" && l.reference.startsWith("INV-") ? l.reference : null;
+      const saleDay = ref ? invDateMap[ref] : undefined;
+      out.push({
         key: `lp-${l.id}`, date: l.entry_date,
-        kind: "recovery",
+        kind: saleDay && saleDay === l.entry_date ? "sale-payment" : "recovery",
         who: l.clients ? `${l.clients.account_no ? `${l.clients.account_no} · ` : ""}${l.clients.name}` : "Customer",
         detail: `${methodLabel(l.method ?? "cash")}${l.note ? ` · ${l.note}` : ""}`,
         amount: Number(l.amount),
-      }));
+      });
+    });
     // Money out: payments we made to merchants.
     merchantPays.forEach((m) => out.push({
       key: `mp-${m.id}`, date: m.entry_date,
@@ -78,7 +88,7 @@ function Recoveries() {
       amount: -Number(e.amount),
     }));
     return out.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
-  }, [invPays, ledgerPays, merchantPays, expenses]);
+  }, [invPays, ledgerPays, merchantPays, expenses, invDateMap]);
 
   const byDay = useMemo(() => {
     const map = new Map<string, Flow[]>();
@@ -90,7 +100,7 @@ function Recoveries() {
     return [...map.entries()].slice(0, 45);
   }, [flows]);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const t = useMemo(() => {
     const todayFlows = flows.filter((f) => f.date === today);
     return {
