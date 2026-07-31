@@ -231,7 +231,7 @@ function StockAdmin() {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className="border-t">
-                  <td className="p-3 whitespace-nowrap">{shortDate(r.date)}</td>
+                  <td className="p-3 whitespace-nowrap">{shortDate(r.date ?? r.created_at)}</td>
                   <td className="p-3 font-mono text-xs text-muted-foreground">{r.reference ?? "—"}</td>
                   <td className="p-3">{r.supplier_name}</td>
                   <td className="p-3">{r.products?.product_name ?? "—"}</td>

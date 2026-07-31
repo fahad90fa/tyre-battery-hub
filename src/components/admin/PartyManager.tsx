@@ -376,7 +376,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
                     className={`border-t ${clickable ? "cursor-pointer hover:bg-muted/50" : ""}`}
                     onClick={() => { if (hasInvoice) setViewInvoice(e.reference); if (hasPurchase) setViewPurchase(e.reference); }}
                     title={clickable ? "Open full details" : undefined}>
-                  <td className="p-2 whitespace-nowrap">{shortDate(e.entry_date)}</td>
+                  <td className="p-2 whitespace-nowrap">{shortDate(e.entry_date ?? e.created_at)}</td>
                   <td className="p-2">
                     <span className={up ? "text-orange-500" : "text-green-600"}>{e.entry_type}</span>
                     {e.note && <div className="text-[10px] text-muted-foreground">{e.note}</div>}

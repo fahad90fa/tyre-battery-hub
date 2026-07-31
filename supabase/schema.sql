@@ -98,7 +98,7 @@ create table public.expenses (
 );
 
 create table public.stock_purchases (
-  date date,
+  date date default current_date,
   quantity integer,
   id uuid primary key default gen_random_uuid(),
   purchase_price numeric,
@@ -199,7 +199,7 @@ create table public.merchants (
 
 create table public.client_ledger (
   id uuid primary key default gen_random_uuid(),
-  entry_date date,
+  entry_date date default current_date,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   entry_type text,
@@ -215,7 +215,7 @@ create table public.merchant_ledger (
   id uuid primary key default gen_random_uuid(),
   merchant_id uuid,
   amount numeric,
-  entry_date date,
+  entry_date date default current_date,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   note text,
