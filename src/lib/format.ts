@@ -15,3 +15,13 @@ export const localToday = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
+
+/** Local (device timezone) date of a timestamp — use instead of
+ *  `ts.slice(0,10)`, which yields the UTC date and is a day behind for
+ *  Pakistan-morning records. */
+export const localDateOf = (ts: string | Date | null | undefined) => {
+  if (!ts) return "";
+  const d = typeof ts === "string" ? new Date(ts) : ts;
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};

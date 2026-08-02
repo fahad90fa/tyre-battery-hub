@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { printArea } from "@/lib/print";
 import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel } from "@/lib/payments";
 import { InvoiceQuickView } from "@/components/admin/InvoiceQuickView";
@@ -356,11 +357,17 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
 
       <div className="flex items-center justify-between">
         <div className="font-semibold text-sm">Transaction history</div>
-        <Button variant="outline" size="sm" onClick={() => window.print()}>
+        <Button variant="outline" size="sm" onClick={() => printArea()}>
           <Printer className="h-4 w-4 mr-2" /> Print ledger
         </Button>
       </div>
-      <div className="rounded-xl border overflow-x-auto">
+      <div className="print-area rounded-xl border overflow-x-auto">
+        <div className="hidden print:block border-b-2 border-black pb-2 mb-3">
+          <div className="text-lg font-black">MT&B HOUSE — Account Ledger</div>
+          <div className="text-sm">
+            {party.name}{party.account_no ? ` (${party.account_no})` : ""} · Balance due {money(current)}
+          </div>
+        </div>
         <table className="w-full min-w-[560px] text-sm">
           <thead className="bg-muted text-xs uppercase text-muted-foreground text-left">
             <tr><th className="p-2">Date</th><th className="p-2">Type</th><th className="p-2">Method</th><th className="p-2">Amount</th><th className="p-2">Balance</th><th className="p-2">Ref</th><th className="p-2"></th></tr>

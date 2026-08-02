@@ -32,7 +32,7 @@ function StockAdmin() {
   const load = async () => {
     const [{ data: r }, { data: p }, { data: m }] = await Promise.all([
       supabase.from("stock_purchases").select("*, products(product_name)").order("date", { ascending: false }).order("created_at", { ascending: false }),
-      supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price"),
+      supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price, selling_price"),
       supabase.from("merchants").select("id, name, account_no").order("name"),
     ]);
     setRows(r ?? []); setProducts(p ?? []); setMerchants(m ?? []);
@@ -158,8 +158,9 @@ function StockAdmin() {
                       value={l.product_id}
                       onValueChange={(v) => {
                         const p = products.find((x) => x.id === v);
-                        const base = Number(p?.purchase_price) || 0;
+                        // Base = last purchase cost, else the product's list price.
                         // % is always entered manually per transaction — never carried over.
+                        const base = Number(p?.purchase_price) || Number(p?.selling_price) || 0;
                         setLine(i, { product_id: v, base, pct: 0, unit_cost: base });
                       }}
                       placeholder="Product"
@@ -176,18 +177,13 @@ function StockAdmin() {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Quantity</Label>
-                    <Input type="number" placeholder="Qty" value={l.quantity || ""} onChange={(e) => setLine(i, { quantity: Number(e.target.value) })} />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Unit cost (Rs)</Label>
-                    <Input type="number" placeholder="0" value={l.unit_cost || ""} onChange={(e) => {
-                      const unit_cost = Number(e.target.value);
-                      setLine(i, { unit_cost, pct: impliedPct(l.base, unit_cost) });
+                    <Label className="text-[11px] text-muted-foreground">Base / list price (Rs)</Label>
+                    <Input type="number" placeholder="0" value={l.base || ""} onChange={(e) => {
+                      const base = Number(e.target.value) || 0;
+                      // Re-apply the current % to the new base so the cost follows.
+                      setLine(i, { base, unit_cost: base > 0 ? applyPct(base, l.pct) : l.unit_cost });
                     }} />
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground">Adjust % (+/−, manual)</Label>
                     <div className="relative">
@@ -198,6 +194,19 @@ function StockAdmin() {
                       <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
                     </div>
                   </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Quantity</Label>
+                    <Input type="number" placeholder="Qty" value={l.quantity || ""} onChange={(e) => setLine(i, { quantity: Number(e.target.value) })} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Final unit cost (Rs)</Label>
+                    <Input type="number" placeholder="0" value={l.unit_cost || ""} onChange={(e) => {
+                      const unit_cost = Number(e.target.value);
+                      setLine(i, { unit_cost, pct: impliedPct(l.base, unit_cost) });
+                    }} />
+                  </div>
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground">Line total</Label>
                     <div className="h-9 rounded-md border bg-muted/40 grid place-items-center text-sm font-bold">
@@ -207,7 +216,12 @@ function StockAdmin() {
                 </div>
                 {l.pct !== 0 && l.base > 0 && (
                   <div className="text-[11px] text-muted-foreground">
-                    Last cost {money(l.base)} {l.pct > 0 ? "+" : ""}{l.pct}% → {money(l.unit_cost)}
+                    Base {money(l.base)} {l.pct > 0 ? "+" : ""}{l.pct}% → {money(l.unit_cost)} per unit
+                  </div>
+                )}
+                {l.pct !== 0 && !(l.base > 0) && (
+                  <div className="text-[11px] text-destructive">
+                    Enter a base / list price first — the % is applied to it.
                   </div>
                 )}
               </div>

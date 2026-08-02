@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate } from "@/lib/format";
+import { money, shortDate, localDateOf } from "@/lib/format";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -47,7 +47,7 @@ function Inventory() {
   const movements: Movement[] = useMemo(() => {
     const ins: Movement[] = stockIn.map((r) => ({
       key: `in-${r.id}`,
-      date: r.date ?? (r.created_at ?? "").slice(0, 10) ?? null,
+      date: r.date ?? localDateOf(r.created_at) ?? null,
       type: "in",
       productId: r.product_id,
       product: r.products?.product_name ?? "—",
@@ -58,7 +58,7 @@ function Inventory() {
     }));
     const outs: Movement[] = stockOut.map((r) => ({
       key: `out-${r.id}`,
-      date: (r.invoices?.created_at ?? "").slice(0, 10) || null,
+      date: localDateOf(r.invoices?.created_at) || null,
       type: "out",
       productId: r.product_id,
       product: r.product_name || "—",

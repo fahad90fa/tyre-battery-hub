@@ -138,47 +138,39 @@
   animation: sparkle 3s ease-in-out infinite;
 }
 
-/* Print: when a .print-area is present, print ONLY that area.
-   Strategy: display:none every element that is not the print area, not
-   inside it, and not an ancestor of it — ancestors stay in normal flow so
-   the document paginates naturally (no absolute positioning, no clipping,
-   no scattered fragments in the PDF). */
+/* Print: printArea() (src/lib/print.ts) clones the .print-area into
+   #print-root and sets html.printing, so the printed document is plain
+   top-level flow — no dialog transforms, clipping or scattered fragments. */
+#print-root { display: none; }
+
 @media print {
-  @page {
-    size: A4;
-    margin: 12mm;
+  @page { size: A4; margin: 12mm; }
+
+  html.printing, html.printing body {
+    background: #fff !important;
+    height: auto !important;
+    overflow: visible !important;
   }
-  body:has(.print-area) *:not(.print-area):not(.print-area *):not(:has(.print-area)) {
-    display: none !important;
-  }
-  /* Neutralize positioned/clipped ancestors (Radix dialogs, sticky bars). */
-  body:has(.print-area) :has(.print-area) {
+  /* Hide the app; show only the cloned document. */
+  html.printing body > *:not(#print-root) { display: none !important; }
+  html.printing #print-root { display: block !important; }
+  html.printing #print-root,
+  html.printing #print-root * {
     position: static !important;
     transform: none !important;
     translate: none !important;
-    inset: auto !important;
-    max-width: none !important;
     max-height: none !important;
-    width: auto !important;
     overflow: visible !important;
-    border: 0 !important;
     box-shadow: none !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    background: white !important;
-    display: block !important;
+    color: #000 !important;
+    background: transparent !important;
   }
-  body:has(.print-area) .print-area {
-    position: static !important;
-    width: auto !important;
-    padding: 16px !important;
-    background: white !important;
-    color: black !important;
-    overflow: visible !important;
-    max-height: none !important;
-  }
-  body:has(.print-area) {
-    background: white !important;
-    overflow: visible !important;
-  }
+  html.printing #print-root .print-area { padding: 0 !important; }
+  /* Keep tables and cards from splitting awkwardly across pages. */
+  html.printing #print-root table { page-break-inside: auto; width: 100% !important; }
+  html.printing #print-root tr { page-break-inside: avoid; }
+  html.printing #print-root thead { display: table-header-group; }
+  html.printing #print-root .print-avoid-break { page-break-inside: avoid; }
+  /* Elements explicitly marked as screen-only. */
+  html.printing #print-root .print\\:hidden, html.printing .no-print { display: none !important; }
 }

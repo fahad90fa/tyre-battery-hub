@@ -2,9 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate, localToday } from "@/lib/format";
+import { money, shortDate, localToday, localDateOf } from "@/lib/format";
 import { methodLabel } from "@/lib/payments";
-import { HandCoins, Store, TrendingDown, Wallet, CalendarDays } from "lucide-react";
+import { HandCoins, Store, TrendingDown, TrendingUp, Wallet, CalendarDays, Banknote, CreditCard } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/admin/recoveries")({
   component: Recoveries,
@@ -24,21 +24,23 @@ function Recoveries() {
   const [ledgerPays, setLedgerPays] = useState<any[]>([]);
   const [merchantPays, setMerchantPays] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
+  const [sales, setSales] = useState<any[]>([]);
   const [invDateMap, setInvDateMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     (async () => {
-      const [{ data: ip }, { data: lp }, { data: mp }, { data: ex }] = await Promise.all([
+      const [{ data: ip }, { data: lp }, { data: mp }, { data: ex }, { data: sl }] = await Promise.all([
         supabase.from("invoice_payments").select("*, invoices(invoice_id, customer_name, created_at, client_id)").order("payment_date", { ascending: false }),
         supabase.from("client_ledger").select("*, clients(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
         supabase.from("merchant_ledger").select("*, merchants(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
         supabase.from("expenses").select("*").order("date_of_expense", { ascending: false }),
+        supabase.from("customer_purchases").select("purchase_date, total_price, payment_status").order("purchase_date", { ascending: false }),
       ]);
-      setInvPays(ip ?? []); setLedgerPays(lp ?? []); setMerchantPays(mp ?? []); setExpenses(ex ?? []);
+      setInvPays(ip ?? []); setLedgerPays(lp ?? []); setMerchantPays(mp ?? []); setExpenses(ex ?? []); setSales(sl ?? []);
       const refs = [...new Set((lp ?? []).map((l: any) => l.reference).filter((r: any) => typeof r === "string" && r.startsWith("INV-")))];
       if (refs.length) {
         const { data: refInvs } = await supabase.from("invoices").select("invoice_id, created_at").in("invoice_id", refs);
-        setInvDateMap(Object.fromEntries((refInvs ?? []).map((i) => [i.invoice_id, (i.created_at ?? "").slice(0, 10)])));
+        setInvDateMap(Object.fromEntries((refInvs ?? []).map((i) => [i.invoice_id, localDateOf(i.created_at)])));
       }
     })();
   }, []);
@@ -49,7 +51,7 @@ function Recoveries() {
     // Walk-in invoice payments only — account customers are counted via
     // their ledger, so allocation rows against their invoices are skipped.
     invPays.filter((p) => !p.invoices?.client_id).forEach((p) => {
-      const saleDay = (p.invoices?.created_at ?? "").slice(0, 10);
+      const saleDay = localDateOf(p.invoices?.created_at);
       const isRecovery = saleDay && saleDay !== p.payment_date;
       out.push({
         key: `ip-${p.id}`, date: p.payment_date,
@@ -90,6 +92,21 @@ function Recoveries() {
     return out.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
   }, [invPays, ledgerPays, merchantPays, expenses, invDateMap]);
 
+  // Sales are NOT cash flow — kept separate so they never mix into recoveries.
+  const salesByDay = useMemo(() => {
+    const map = new Map<string, { net: number; cash: number; credit: number }>();
+    sales.forEach((sale) => {
+      const d = sale.purchase_date ?? "";
+      if (!d) return;
+      const cur = map.get(d) ?? { net: 0, cash: 0, credit: 0 };
+      const amt = Number(sale.total_price) || 0;
+      cur.net += amt;
+      if (sale.payment_status === "paid") cur.cash += amt; else cur.credit += amt;
+      map.set(d, cur);
+    });
+    return map;
+  }, [sales]);
+
   const byDay = useMemo(() => {
     const map = new Map<string, Flow[]>();
     flows.forEach((f) => {
@@ -103,14 +120,21 @@ function Recoveries() {
   const today = localToday();
   const t = useMemo(() => {
     const todayFlows = flows.filter((f) => f.date === today);
+    const todaySales = salesByDay.get(today) ?? { net: 0, cash: 0, credit: 0 };
     return {
+      // Sales (not cash flow)
+      netSales: todaySales.net,
+      cashSales: todaySales.cash,
+      creditSales: todaySales.credit,
+      // Cash flow
       recToday: todayFlows.filter((f) => f.kind === "recovery").reduce((a, f) => a + f.amount, 0),
+      salePayToday: todayFlows.filter((f) => f.kind === "sale-payment").reduce((a, f) => a + f.amount, 0),
       inToday: todayFlows.filter((f) => f.amount > 0).reduce((a, f) => a + f.amount, 0),
       merToday: Math.abs(todayFlows.filter((f) => f.kind === "merchant-payment").reduce((a, f) => a + f.amount, 0)),
       expToday: Math.abs(todayFlows.filter((f) => f.kind === "expense").reduce((a, f) => a + f.amount, 0)),
       netToday: todayFlows.reduce((a, f) => a + f.amount, 0) + 0,
     };
-  }, [flows, today]);
+  }, [flows, salesByDay, today]);
 
   const KIND: Record<Flow["kind"], { label: string; cls: string }> = {
     "recovery": { label: "Recovery (udhar)", cls: "bg-green-600/10 text-green-600" },
@@ -122,18 +146,26 @@ function Recoveries() {
   const dayLabel = (d: string) => {
     if (d === today) return `Today — ${shortDate(d)}`;
     const y = new Date(); y.setDate(y.getDate() - 1);
-    if (d === y.toISOString().slice(0, 10)) return `Yesterday — ${shortDate(d)}`;
+    if (d === localDateOf(y)) return `Yesterday — ${shortDate(d)}`;
     return shortDate(d);
   };
 
   return (
     <AdminShell title="Recoveries / Cash Flow">
+      <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">Today's sales</div>
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <Kpi icon={TrendingUp} label="Net sales" value={money(t.netSales)} />
+        <Kpi icon={Banknote} label="Cash sales" value={money(t.cashSales)} green />
+        <Kpi icon={CreditCard} label="Credit (udhar) sales" value={money(t.creditSales)} accent={t.creditSales > 0} />
+      </div>
+
+      <div className="mb-1 text-xs uppercase tracking-wider text-muted-foreground">Today's cash flow</div>
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
-        <Kpi icon={HandCoins} label="Recoveries today" value={money(t.recToday)} green />
-        <Kpi icon={Wallet} label="Total in today" value={money(t.inToday)} green />
-        <Kpi icon={Store} label="Merchant payments today" value={money(t.merToday)} accent={t.merToday > 0} />
-        <Kpi icon={TrendingDown} label="Expenses today" value={money(t.expToday)} accent={t.expToday > 0} />
-        <Kpi icon={Wallet} label="Net today" value={money(t.netToday)} green={t.netToday >= 0} accent={t.netToday < 0} />
+        <Kpi icon={HandCoins} label="Recoveries (old udhar only)" value={money(t.recToday)} green />
+        <Kpi icon={Banknote} label="Today's sale payments" value={money(t.salePayToday)} />
+        <Kpi icon={Wallet} label="Total cash in" value={money(t.inToday)} green />
+        <Kpi icon={Store} label="Merchant payments" value={money(t.merToday)} accent={t.merToday > 0} />
+        <Kpi icon={TrendingDown} label="Expenses" value={money(t.expToday)} accent={t.expToday > 0} />
       </div>
 
       <div className="space-y-4">
@@ -143,14 +175,18 @@ function Recoveries() {
         {byDay.map(([day, list]) => {
           const dayIn = list.filter((f) => f.amount > 0).reduce((a, f) => a + f.amount, 0);
           const dayOut = Math.abs(list.filter((f) => f.amount < 0).reduce((a, f) => a + f.amount, 0));
+          const dayRec = list.filter((f) => f.kind === "recovery").reduce((a, f) => a + f.amount, 0);
+          const daySales = salesByDay.get(day);
           return (
             <div key={day} className="rounded-2xl bg-card shadow-sm overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 bg-muted/60 border-b flex-wrap gap-2">
                 <div className="flex items-center gap-2 font-semibold text-sm">
                   <CalendarDays className="h-4 w-4 text-gold" /> {dayLabel(day)}
                 </div>
-                <div className="text-xs flex gap-3">
-                  <span className="text-green-600 font-semibold">In {money(dayIn)}</span>
+                <div className="text-xs flex gap-3 flex-wrap">
+                  {daySales && <span className="text-muted-foreground">Sales {money(daySales.net)}</span>}
+                  <span className="text-green-600 font-semibold">Recovered {money(dayRec)}</span>
+                  <span className="text-green-600">In {money(dayIn)}</span>
                   <span className="text-orange-500 font-semibold">Out {money(dayOut)}</span>
                   <span className={`font-bold ${dayIn - dayOut >= 0 ? "text-green-600" : "text-destructive"}`}>Net {money(dayIn - dayOut)}</span>
                 </div>
