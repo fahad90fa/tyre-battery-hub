@@ -327,11 +327,14 @@ function QuotationsAdmin() {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Adjust % (+/−, manual)</Label>
+                      <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Adjust % (optional)</Label>
                       <div className="relative">
                         <Input type="number" placeholder="0" className="pr-6 text-right" value={l.pct || ""} onChange={(e) => {
                           const pct = Number(e.target.value) || 0;
-                          setLine(i, { pct, unit_price: l.base > 0 ? applyPct(l.base, pct) : l.unit_price, priceEdited: true });
+                          // Custom items have no saved price — treat the typed
+                          // price as the base so the % still applies.
+                          const base = l.base > 0 ? l.base : l.unit_price;
+                          setLine(i, { pct, base, unit_price: base > 0 ? applyPct(base, pct) : l.unit_price, priceEdited: true });
                         }} />
                         <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
                       </div>
