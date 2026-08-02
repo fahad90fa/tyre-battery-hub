@@ -9,8 +9,11 @@
 export const applyPct = (base: number, pct: number) => {
   const b = Number(base) || 0;
   const p = Number(pct) || 0;
-  // work in paise to avoid float error, e.g. 12500 * 1.1 -> 13750 exactly
-  return Math.round(b * 100 * (1 + p / 100)) / 100;
+  if (p === 0) return b;                       // no % -> price is the base, untouched
+  // Whole rupees: every screen and print shows rupees, so the stored figure
+  // must match exactly (paise would make totals disagree by a rupee).
+  // Integer math on paise first avoids float drift (12500 * 1.1 -> 13750).
+  return Math.round(Math.round(b * 100 * (1 + p / 100)) / 100);
 };
 
 /** Reverse: what percentage turns `base` into `price` (1 decimal). */

@@ -15,13 +15,13 @@ export const Route = createFileRoute("/_authenticated/admin/stock")({
   component: StockAdmin,
 });
 
-type PurchaseLine = { product_id: string; quantity: number; unit_cost: number; base: number; pct: number };
+type PurchaseLine = { uid: string; product_id: string; quantity: number; unit_cost: number; base: number; pct: number };
 
 /** Final price = base ± % (no % → final equals the base). Always defined. */
 const finalOf = (l: { base: number; pct: number; unit_cost: number }) =>
   Number(l.base) > 0 ? applyPct(Number(l.base), Number(l.pct) || 0) : Number(l.unit_cost) || 0;
 
-const emptyLine = (): PurchaseLine => ({ product_id: "", quantity: 1, unit_cost: 0, base: 0, pct: 0 });
+const emptyLine = (): PurchaseLine => ({ uid: crypto.randomUUID(), product_id: "", quantity: 1, unit_cost: 0, base: 0, pct: 0 });
 
 function StockAdmin() {
   const [rows, setRows] = useState<any[]>([]);
@@ -45,17 +45,22 @@ function StockAdmin() {
 
   const setLine = (i: number, patch: Partial<PurchaseLine>) =>
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  /** Patch by stable id — safe after an await, when rows may have shifted. */
+  const setLineByUid = (uid: string, patch: Partial<PurchaseLine>) =>
+    setLines((ls) => ls.map((l) => (l.uid === uid ? { ...l, ...patch } : l)));
 
   // Instantly create a brand-new product from the picker (first-time arrivals).
-  const createProduct = async (i: number, name: string) => {
+  const createProduct = async (uid: string, name: string) => {
     const { data, error } = await supabase.from("products")
       .insert({ product_name: name, quantity_in_stock: 0, purchase_price: 0, selling_price: 0 })
       .select().maybeSingle();
     if (error) return toast.error(error.message);
     if (data) {
       setProducts((ps) => [...ps, data]);
-      setLine(i, { product_id: data.id });
-      toast.success(`New product "${name}" added — you can edit it any time in Products`);
+      // A brand-new product has no price yet — clear any price left over from
+      // the product previously chosen on this line.
+      setLineByUid(uid, { product_id: data.id, base: 0, pct: 0, unit_cost: 0 });
+      toast.success(`New product "${name}" added — enter its base price below`);
     }
   };
 
@@ -67,6 +72,10 @@ function StockAdmin() {
     if (valid.length === 0) return toast.error("Add at least one product line");
     if (lines.some((l) => !l.product_id && (Number(l.quantity) || 0) * finalOf(l) > 0))
       return toast.error("Select a product for every filled item line");
+    // A line with a product but a blank/zero/fractional qty would be dropped
+    // from the save while still counting in the on-screen total.
+    if (lines.some((l) => l.product_id && !(Number.isInteger(Number(l.quantity)) && Number(l.quantity) > 0)))
+      return toast.error("Enter a whole quantity of 1 or more for every item line");
     if (valid.some((l) => !(finalOf(l) > 0)))
       return toast.error("Enter a base / list price for every item line");
     const supplier = supplierName || merchants.find((m) => m.id === merchantId)?.name || "";
@@ -154,7 +163,7 @@ function StockAdmin() {
               </Button>
             </div>
             {lines.map((l, i) => (
-              <div key={i} className="space-y-2.5 rounded-xl border bg-muted/20 p-3">
+              <div key={l.uid} className="space-y-2.5 rounded-xl border bg-muted/20 p-3">
                 <div className="flex gap-1.5 items-center">
                   <div className="flex-1 min-w-0">
                     <SearchableSelect
@@ -169,7 +178,7 @@ function StockAdmin() {
                       }}
                       placeholder="Product"
                       searchPlaceholder="Search or type new product name..."
-                      onCreate={(name) => createProduct(i, name)}
+                      onCreate={(name) => createProduct(l.uid, name)}
                       createLabel="Add new product"
                     />
                   </div>
@@ -220,7 +229,7 @@ function StockAdmin() {
                 <div className="grid grid-cols-3 gap-2">
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Qty</Label>
-                    <Input type="number" placeholder="Qty" value={l.quantity || ""} onChange={(e) => setLine(i, { quantity: Number(e.target.value) })} />
+                    <Input type="number" min="1" step="1" placeholder="Qty" value={l.quantity || ""} onChange={(e) => setLine(i, { quantity: Number(e.target.value) })} />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Override</Label>

@@ -245,7 +245,14 @@ function PosPage() {
                       <Input type="number" className="h-9" placeholder="0" value={l.price || ""}
                              onChange={(e) => {
                                const price = Number(e.target.value);
-                               setCartLine(i, { price, pct: impliedPct(l.base, price) });
+                               // With a known base, back-compute the %. Without one,
+                               // the typed price becomes the base and any % already
+                               // entered is applied when the field loses focus.
+                               if (l.base > 0) setCartLine(i, { price, pct: impliedPct(l.base, price) });
+                               else setCartLine(i, { price, base: price });
+                             }}
+                             onBlur={() => {
+                               if (l.pct !== 0 && l.base > 0) setCartLine(i, { price: applyPct(l.base, l.pct) });
                              }} />
                     </div>
                   </div>
@@ -289,7 +296,12 @@ function PosPage() {
               </div>
               <Button type="button" variant="outline" size="sm" onClick={() => {
                 const pct = Number(billPct) || 0;
-                setCart((c) => c.map((l) => (l.base > 0 ? { ...l, pct, price: applyPct(l.base, pct) } : l)));
+                setCart((c) => c.map((l) => {
+                  // Items with no saved price use their typed price as the base,
+                  // so "Adjust all" never skips a line.
+                  const base = l.base > 0 ? l.base : l.price;
+                  return base > 0 ? { ...l, base, pct, price: applyPct(base, pct) } : l;
+                }));
               }}>Apply</Button>
             </div>
           )}
