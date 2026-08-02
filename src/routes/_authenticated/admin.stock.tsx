@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
-import { applyPct, impliedPct } from "@/lib/pricing";
+import { applyPct } from "@/lib/pricing";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -16,6 +16,10 @@ export const Route = createFileRoute("/_authenticated/admin/stock")({
 });
 
 type PurchaseLine = { product_id: string; quantity: number; unit_cost: number; base: number; pct: number };
+
+/** Final price = base ± % (no % → final equals the base). Always defined. */
+const finalOf = (l: { base: number; pct: number; unit_cost: number }) =>
+  Number(l.base) > 0 ? applyPct(Number(l.base), Number(l.pct) || 0) : Number(l.unit_cost) || 0;
 
 const emptyLine = (): PurchaseLine => ({ product_id: "", quantity: 1, unit_cost: 0, base: 0, pct: 0 });
 
@@ -55,25 +59,25 @@ function StockAdmin() {
     }
   };
 
-  const total = lines.reduce((a, l) => a + (Number(l.quantity) || 0) * (Number(l.unit_cost) || 0), 0);
+  const total = lines.reduce((a, l) => a + (Number(l.quantity) || 0) * finalOf(l), 0);
 
   const add = async () => {
     if (!merchantId) return toast.error("Select the merchant this stock was purchased from");
     const valid = lines.filter((l) => l.product_id && Number(l.quantity) > 0);
     if (valid.length === 0) return toast.error("Add at least one product line");
-    if (lines.some((l) => !l.product_id && (Number(l.quantity) || 0) * (Number(l.unit_cost) || 0) > 0))
+    if (lines.some((l) => !l.product_id && (Number(l.quantity) || 0) * finalOf(l) > 0))
       return toast.error("Select a product for every filled item line");
-    if (valid.some((l) => !(Number(l.unit_cost) > 0)))
-      return toast.error("Enter a unit cost for every item line");
+    if (valid.some((l) => !(finalOf(l) > 0)))
+      return toast.error("Enter a base / list price for every item line");
     const supplier = supplierName || merchants.find((m) => m.id === merchantId)?.name || "";
-    const validTotal = valid.reduce((a, l) => a + Number(l.quantity) * Number(l.unit_cost), 0);
+    const validTotal = valid.reduce((a, l) => a + Number(l.quantity) * finalOf(l), 0);
 
     setSaving(true);
     try {
       const ref = "PUR-" + Date.now();
       const { error } = await supabase.from("stock_purchases").insert(valid.map((l) => ({
         date, supplier_name: supplier, product_id: l.product_id,
-        quantity: Number(l.quantity), purchase_price: Number(l.unit_cost),
+        quantity: Number(l.quantity), purchase_price: finalOf(l),
         reference: ref, merchant_id: merchantId,
       })));
       if (error) return toast.error(error.message);
@@ -82,7 +86,7 @@ function StockAdmin() {
       const byProduct = new Map<string, { qty: number; unit_cost: number }>();
       for (const l of valid) {
         const cur = byProduct.get(l.product_id);
-        byProduct.set(l.product_id, { qty: (cur?.qty ?? 0) + Number(l.quantity), unit_cost: Number(l.unit_cost) });
+        byProduct.set(l.product_id, { qty: (cur?.qty ?? 0) + Number(l.quantity), unit_cost: finalOf(l) });
       }
       for (const [productId, { qty, unit_cost }] of byProduct) {
         const prod = products.find((p) => p.id === productId);
@@ -98,7 +102,7 @@ function StockAdmin() {
 
       const detail = valid.map((l) => {
         const p = products.find((x) => x.id === l.product_id);
-        return `${p?.product_name ?? "?"} × ${l.quantity} @ ${money(l.unit_cost)}`;
+        return `${p?.product_name ?? "?"} × ${l.quantity} @ ${money(finalOf(l))}`;
       }).join("; ");
       const { error: ledErr } = await supabase.from("merchant_ledger").insert({
         merchant_id: merchantId, entry_type: "purchase", amount: validTotal,
@@ -177,53 +181,62 @@ function StockAdmin() {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Base / list price (Rs)</Label>
+                    <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Base / list price (Rs)</Label>
                     <Input type="number" placeholder="0" value={l.base || ""} onChange={(e) => {
                       const base = Number(e.target.value) || 0;
-                      // Re-apply the current % to the new base so the cost follows.
-                      setLine(i, { base, unit_cost: base > 0 ? applyPct(base, l.pct) : l.unit_cost });
+                      // Final price always follows the base (with % if one is set).
+                      setLine(i, { base, unit_cost: base > 0 ? applyPct(base, l.pct) : 0 });
                     }} />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Adjust % (+/−, manual)</Label>
+                    <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Adjust % (optional)</Label>
                     <div className="relative">
                       <Input type="number" placeholder="0" className="pr-6 text-right" value={l.pct || ""} onChange={(e) => {
                         const pct = Number(e.target.value) || 0;
-                        setLine(i, { pct, unit_cost: l.base > 0 ? applyPct(l.base, pct) : l.unit_cost });
+                        // % is optional: with no base yet, treat the typed final
+                        // price as the base so the adjustment still applies.
+                        const base = Number(l.base) > 0 ? Number(l.base) : Number(l.unit_cost) || 0;
+                        setLine(i, { pct, base, unit_cost: base > 0 ? applyPct(base, pct) : 0 });
                       }} />
                       <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
                     </div>
                   </div>
                 </div>
+                {/* Final price — always calculated from the base (± % if set) */}
+                <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Final price / unit</div>
+                    <div className="text-lg font-black text-primary">{money(finalOf(l))}</div>
+                  </div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                    {Number(l.base) > 0
+                      ? (Number(l.pct) === 0
+                          ? `Base ${money(l.base)} · no % applied`
+                          : `Base ${money(l.base)} ${l.pct > 0 ? "+" : ""}${l.pct}% = ${money(finalOf(l))}`)
+                      : "Enter a base / list price above"}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-3 gap-2">
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Quantity</Label>
+                    <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Qty</Label>
                     <Input type="number" placeholder="Qty" value={l.quantity || ""} onChange={(e) => setLine(i, { quantity: Number(e.target.value) })} />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Final unit cost (Rs)</Label>
+                    <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Override</Label>
                     <Input type="number" placeholder="0" value={l.unit_cost || ""} onChange={(e) => {
-                      const unit_cost = Number(e.target.value);
-                      setLine(i, { unit_cost, pct: impliedPct(l.base, unit_cost) });
+                      // Typing a price directly makes it the base with no %.
+                      const unit_cost = Number(e.target.value) || 0;
+                      setLine(i, { unit_cost, base: unit_cost, pct: 0 });
                     }} />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Line total</Label>
+                    <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Line total</Label>
                     <div className="h-9 rounded-md border bg-muted/40 grid place-items-center text-sm font-bold">
-                      {money((Number(l.quantity) || 0) * (Number(l.unit_cost) || 0))}
+                      {money((Number(l.quantity) || 0) * finalOf(l))}
                     </div>
                   </div>
                 </div>
-                {l.pct !== 0 && l.base > 0 && (
-                  <div className="text-[11px] text-muted-foreground">
-                    Base {money(l.base)} {l.pct > 0 ? "+" : ""}{l.pct}% → {money(l.unit_cost)} per unit
-                  </div>
-                )}
-                {l.pct !== 0 && !(l.base > 0) && (
-                  <div className="text-[11px] text-destructive">
-                    Enter a base / list price first — the % is applied to it.
-                  </div>
-                )}
               </div>
             ))}
             <div className="flex justify-between text-sm pt-1 border-t">

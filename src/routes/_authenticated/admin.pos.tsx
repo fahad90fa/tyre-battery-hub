@@ -251,12 +251,15 @@ function PosPage() {
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2 items-end">
                     <div className="space-y-1">
-                      <div className="text-[11px] text-muted-foreground">Adjust % (+/−, manual)</div>
+                      <div className="text-[11px] text-muted-foreground whitespace-nowrap">Adjust % (optional)</div>
                       <div className="relative">
                         <Input type="number" className="h-9 pr-6 text-right" placeholder="0" value={l.pct || ""}
                                onChange={(e) => {
                                  const pct = Number(e.target.value);
-                                 setCartLine(i, { pct, price: l.base > 0 ? applyPct(l.base, pct) : l.price });
+                                 // If the product has no saved price, treat the
+                                 // typed price as the base so % still applies.
+                                 const base = l.base > 0 ? l.base : l.price;
+                                 setCartLine(i, { pct, base, price: base > 0 ? applyPct(base, pct) : l.price });
                                }} />
                         <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
                       </div>

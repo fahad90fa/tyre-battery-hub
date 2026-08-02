@@ -199,7 +199,7 @@ function CustomersAdmin() {
               const p = products.find((x) => x.id === form.product_id);
               setForm({ ...form, quantity_purchased: qty, total_price: p && Number(p.selling_price) > 0 ? applyPct(p.selling_price * qty, form.pct) : form.total_price });
             }} /></div>
-            <div className="space-y-1.5"><Label>Adjust % (+/−, manual)</Label><Input type="number" placeholder="0" value={form.pct || ""} onChange={(e) => {
+            <div className="space-y-1.5"><Label>Adjust % (optional)</Label><Input type="number" placeholder="0" value={form.pct || ""} onChange={(e) => {
               const pct = Number(e.target.value) || 0;
               const p = products.find((x) => x.id === form.product_id);
               setForm({ ...form, pct, total_price: p && Number(p.selling_price) > 0 ? applyPct(p.selling_price * form.quantity_purchased, pct) : form.total_price });
