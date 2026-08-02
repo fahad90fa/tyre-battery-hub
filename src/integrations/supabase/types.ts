@@ -14,6 +14,78 @@ export type Database = {
   }
   public: {
     Tables: {
+      amanat_items: {
+        Row: {
+          amanat_no: string | null
+          client_id: string | null
+          created_at: string
+          customer_name: string
+          expected_return_date: string | null
+          given_date: string
+          id: string
+          item_name: string
+          notes: string | null
+          phone: string | null
+          product_id: string | null
+          quantity: number
+          returned_date: string | null
+          returned_quantity: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amanat_no?: string | null
+          client_id?: string | null
+          created_at?: string
+          customer_name: string
+          expected_return_date?: string | null
+          given_date?: string
+          id?: string
+          item_name: string
+          notes?: string | null
+          phone?: string | null
+          product_id?: string | null
+          quantity?: number
+          returned_date?: string | null
+          returned_quantity?: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amanat_no?: string | null
+          client_id?: string | null
+          created_at?: string
+          customer_name?: string
+          expected_return_date?: string | null
+          given_date?: string
+          id?: string
+          item_name?: string
+          notes?: string | null
+          phone?: string | null
+          product_id?: string | null
+          quantity?: number
+          returned_date?: string | null
+          returned_quantity?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "amanat_items_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "amanat_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       brands: {
         Row: {
           created_at: string

@@ -39,6 +39,7 @@ import { Route as AuthenticatedAdminCustomersRouteImport } from './routes/_authe
 import { Route as AuthenticatedAdminClosingRouteImport } from './routes/_authenticated/admin.closing'
 import { Route as AuthenticatedAdminClientsRouteImport } from './routes/_authenticated/admin.clients'
 import { Route as AuthenticatedAdminCategoriesRouteImport } from './routes/_authenticated/admin.categories'
+import { Route as AuthenticatedAdminAmanatRouteImport } from './routes/_authenticated/admin.amanat'
 
 const ShopRoute = ShopRouteImport.update({
   id: '/shop',
@@ -204,6 +205,12 @@ const AuthenticatedAdminCategoriesRoute =
     path: '/categories',
     getParentRoute: () => AuthenticatedAdminRoute,
   } as any)
+const AuthenticatedAdminAmanatRoute =
+  AuthenticatedAdminAmanatRouteImport.update({
+    id: '/amanat',
+    path: '/amanat',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -215,6 +222,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AuthenticatedAdminRouteWithChildren
   '/category/$slug': typeof CategorySlugRoute
   '/product/$id': typeof ProductIdRoute
+  '/admin/amanat': typeof AuthenticatedAdminAmanatRoute
   '/admin/categories': typeof AuthenticatedAdminCategoriesRoute
   '/admin/clients': typeof AuthenticatedAdminClientsRoute
   '/admin/closing': typeof AuthenticatedAdminClosingRoute
@@ -245,6 +253,7 @@ export interface FileRoutesByTo {
   '/account': typeof AuthenticatedAccountRoute
   '/category/$slug': typeof CategorySlugRoute
   '/product/$id': typeof ProductIdRoute
+  '/admin/amanat': typeof AuthenticatedAdminAmanatRoute
   '/admin/categories': typeof AuthenticatedAdminCategoriesRoute
   '/admin/clients': typeof AuthenticatedAdminClientsRoute
   '/admin/closing': typeof AuthenticatedAdminClosingRoute
@@ -278,6 +287,7 @@ export interface FileRoutesById {
   '/_authenticated/admin': typeof AuthenticatedAdminRouteWithChildren
   '/category/$slug': typeof CategorySlugRoute
   '/product/$id': typeof ProductIdRoute
+  '/_authenticated/admin/amanat': typeof AuthenticatedAdminAmanatRoute
   '/_authenticated/admin/categories': typeof AuthenticatedAdminCategoriesRoute
   '/_authenticated/admin/clients': typeof AuthenticatedAdminClientsRoute
   '/_authenticated/admin/closing': typeof AuthenticatedAdminClosingRoute
@@ -311,6 +321,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/category/$slug'
     | '/product/$id'
+    | '/admin/amanat'
     | '/admin/categories'
     | '/admin/clients'
     | '/admin/closing'
@@ -341,6 +352,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/category/$slug'
     | '/product/$id'
+    | '/admin/amanat'
     | '/admin/categories'
     | '/admin/clients'
     | '/admin/closing'
@@ -373,6 +385,7 @@ export interface FileRouteTypes {
     | '/_authenticated/admin'
     | '/category/$slug'
     | '/product/$id'
+    | '/_authenticated/admin/amanat'
     | '/_authenticated/admin/categories'
     | '/_authenticated/admin/clients'
     | '/_authenticated/admin/closing'
@@ -618,10 +631,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminCategoriesRouteImport
       parentRoute: typeof AuthenticatedAdminRoute
     }
+    '/_authenticated/admin/amanat': {
+      id: '/_authenticated/admin/amanat'
+      path: '/amanat'
+      fullPath: '/admin/amanat'
+      preLoaderRoute: typeof AuthenticatedAdminAmanatRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
   }
 }
 
 interface AuthenticatedAdminRouteChildren {
+  AuthenticatedAdminAmanatRoute: typeof AuthenticatedAdminAmanatRoute
   AuthenticatedAdminCategoriesRoute: typeof AuthenticatedAdminCategoriesRoute
   AuthenticatedAdminClientsRoute: typeof AuthenticatedAdminClientsRoute
   AuthenticatedAdminClosingRoute: typeof AuthenticatedAdminClosingRoute
@@ -645,6 +666,7 @@ interface AuthenticatedAdminRouteChildren {
 }
 
 const AuthenticatedAdminRouteChildren: AuthenticatedAdminRouteChildren = {
+  AuthenticatedAdminAmanatRoute: AuthenticatedAdminAmanatRoute,
   AuthenticatedAdminCategoriesRoute: AuthenticatedAdminCategoriesRoute,
   AuthenticatedAdminClientsRoute: AuthenticatedAdminClientsRoute,
   AuthenticatedAdminClosingRoute: AuthenticatedAdminClosingRoute,

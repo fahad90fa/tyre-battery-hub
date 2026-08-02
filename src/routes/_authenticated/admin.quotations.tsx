@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
+import { printArea } from "@/lib/print";
 import { money, shortDate, localToday } from "@/lib/format";
 import { Letterhead } from "@/components/admin/Letterhead";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
@@ -418,7 +419,7 @@ function QuotationsAdmin() {
                 ))}
               </SelectContent>
             </Select>
-            <Button variant="outline" onClick={() => window.print()}><Printer className="h-4 w-4 mr-2" /> Print</Button>
+            <Button variant="outline" onClick={() => printArea()}><Printer className="h-4 w-4 mr-2" /> Print</Button>
             {viewing?.status !== "converted" && (
               <Button onClick={convertToInvoice}><FileText className="h-4 w-4 mr-2" /> Convert to invoice</Button>
             )}

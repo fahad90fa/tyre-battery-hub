@@ -20,6 +20,7 @@ drop table if exists public.merchants cascade;
 drop table if exists public.employees cascade;
 drop table if exists public.reports_inbox cascade;
 drop table if exists public.templates cascade;
+drop table if exists public.amanat_items cascade;
 drop table if exists public.daily_closings cascade;
 drop table if exists public.quotation_items cascade;
 drop table if exists public.quotations cascade;
@@ -310,6 +311,27 @@ create table public.daily_closings (
   expenses numeric not null default 0,
   net_cash numeric not null default 0,
   cash_in_hand numeric,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create sequence if not exists public.amanat_no_seq start 1001;
+
+create table public.amanat_items (
+  id uuid primary key default gen_random_uuid(),
+  amanat_no text unique default ('AMT-' || nextval('public.amanat_no_seq')),
+  customer_name text not null,
+  phone text,
+  client_id uuid references public.clients(id) on delete set null,
+  product_id uuid references public.products(id) on delete set null,
+  item_name text not null,
+  quantity integer not null default 1,
+  given_date date not null default current_date,
+  expected_return_date date,
+  status text not null default 'out',
+  returned_date date,
+  returned_quantity integer not null default 0,
   notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

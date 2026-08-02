@@ -2,7 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate, localToday } from "@/lib/format";
+import { printArea } from "@/lib/print";
+import { money, shortDate, localToday, localDateOf } from "@/lib/format";
 import { methodLabel } from "@/lib/payments";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,7 +46,7 @@ function DailyClosing() {
     const refs = [...new Set((lp ?? []).map((l: any) => l.reference).filter((r: any) => typeof r === "string" && r.startsWith("INV-")))];
     if (refs.length) {
       const { data: refInvs } = await supabase.from("invoices").select("invoice_id, created_at").in("invoice_id", refs);
-      setRefMap(Object.fromEntries((refInvs ?? []).map((i) => [i.invoice_id, (i.created_at ?? "").slice(0, 10)])));
+      setRefMap(Object.fromEntries((refInvs ?? []).map((i) => [i.invoice_id, localDateOf(i.created_at)])));
     } else setRefMap({});
     setCashInHand(cl?.cash_in_hand != null ? String(cl.cash_in_hand) : "");
     setNotes(cl?.notes ?? "");
@@ -62,7 +63,7 @@ function DailyClosing() {
     // counting them too would double-count the same rupees.
     const walkInPays = payments.filter((p) => !p.invoices?.client_id);
     const allIn = [
-      ...walkInPays.map((p) => ({ amount: Number(p.amount), method: p.method as string, who: p.invoices?.customer_name ?? "Walk-in", ref: p.invoices?.invoice_id, isRecovery: (p.invoices?.created_at ?? "").slice(0, 10) !== date })),
+      ...walkInPays.map((p) => ({ amount: Number(p.amount), method: p.method as string, who: p.invoices?.customer_name ?? "Walk-in", ref: p.invoices?.invoice_id, isRecovery: localDateOf(p.invoices?.created_at) !== date })),
       ...ledgerPays.map((l) => {
         const ref = typeof l.reference === "string" && l.reference.startsWith("INV-") ? l.reference : null;
         const saleDay = ref ? refMap[ref] : undefined;
@@ -112,7 +113,7 @@ function DailyClosing() {
         <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-44" />
         <div className="flex items-center gap-2">
           {closing && <span className="text-xs rounded-full bg-green-600/10 text-green-600 px-3 py-1 font-semibold">Closed ✓</span>}
-          <Button variant="outline" onClick={() => window.print()}><Printer className="h-4 w-4 mr-2" /> Print report</Button>
+          <Button variant="outline" onClick={() => printArea()}><Printer className="h-4 w-4 mr-2" /> Print report</Button>
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { printArea } from "@/lib/print";
 import { money, shortDate } from "@/lib/format";
 import { methodLabel } from "@/lib/payments";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -97,7 +98,7 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
                 ))}
               </div>
             )}
-            <Button variant="outline" className="w-full mt-2 print:hidden" onClick={() => window.print()}>
+            <Button variant="outline" className="w-full mt-2 print:hidden" onClick={() => printArea()}>
               <Printer className="h-4 w-4 mr-2" /> Print
             </Button>
           </div>

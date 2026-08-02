@@ -2,7 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate, localToday } from "@/lib/format";
+import { printArea } from "@/lib/print";
+import { money, shortDate, localToday, localDateOf } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, paymentStatus } from "@/lib/payments";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,7 +47,7 @@ function InvoicesAdmin() {
 
   const filtered = useMemo(() => {
     let list = rows;
-    if (dateFilter) list = list.filter((r) => (r.created_at ?? "").slice(0, 10) === dateFilter);
+    if (dateFilter) list = list.filter((r) => localDateOf(r.created_at) === dateFilter);
     if (tab === "outstanding") return list.filter((r) => balanceOf(r) > 0);
     if (tab === "overdue") return list.filter(isOverdue);
     return list;
@@ -236,7 +237,7 @@ function InvoicesAdmin() {
             </div>
           )}
 
-          <Button className="w-full mt-2 print:hidden" onClick={() => window.print()}>
+          <Button className="w-full mt-2 print:hidden" onClick={() => printArea()}>
             <Printer className="h-4 w-4 mr-2" /> Print
           </Button>
         </DialogContent>

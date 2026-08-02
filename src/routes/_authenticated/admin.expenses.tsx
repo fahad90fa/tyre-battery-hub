@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate, localToday } from "@/lib/format";
+import { money, shortDate, localToday, localDateOf } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -58,7 +58,7 @@ function ExpensesAdmin() {
   const dayLabel = (d: string) => {
     if (d === today) return `Today — ${shortDate(d)}`;
     const y = new Date(); y.setDate(y.getDate() - 1);
-    if (d === y.toISOString().slice(0, 10)) return `Yesterday — ${shortDate(d)}`;
+    if (d === localDateOf(y)) return `Yesterday — ${shortDate(d)}`;
     return shortDate(d);
   };
 

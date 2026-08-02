@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 import {
   LayoutDashboard, Package, Tag, Truck, Users, Wallet, FileText, BarChart3,
   ShoppingCart, LogOut, Wrench, Store, UserCircle, Briefcase, LayoutTemplate,
-  Inbox, Settings, Menu, FileSpreadsheet, Zap, CalendarCheck, ArrowLeftRight, HandCoins,
+  Inbox, Settings, Menu, FileSpreadsheet, Zap, CalendarCheck, ArrowLeftRight, HandCoins, PackageOpen,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { signOut, useAuth } from "@/hooks/useAuth";
@@ -18,6 +18,7 @@ const GROUPS: { label: string; links: { to: string; label: string; icon: any; ex
     { to: "/admin/templates", label: "Templates", icon: LayoutTemplate },
     { to: "/admin/stock", label: "Stock Purchases", icon: Truck },
     { to: "/admin/inventory", label: "Stock Movements", icon: ArrowLeftRight },
+    { to: "/admin/amanat", label: "Amanat (Deposit)", icon: PackageOpen },
   ]},
   { label: "Accounts", links: [
     { to: "/admin/clients", label: "Customer Accounts", icon: UserCircle },
