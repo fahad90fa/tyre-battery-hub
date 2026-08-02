@@ -299,7 +299,12 @@ function QuotationsAdmin() {
                         }}
                         placeholder={l.product_name || "Product"}
                         searchPlaceholder="Search or type any item name..."
-                        onCreate={(name) => setLine(i, { product_id: "", product_name: name })}
+                        onCreate={(name) => setLine(i, {
+                          // Custom item starts unpriced — never inherit the
+                          // previously selected product's price or %.
+                          product_id: "", product_name: name,
+                          base: 0, pct: 0, unit_price: 0, priceEdited: false,
+                        })}
                         createLabel="Use custom item"
                       />
                     </div>
@@ -319,10 +324,18 @@ function QuotationsAdmin() {
                     </div>
                     <div className="space-y-1">
                       <Label className="text-[11px] text-muted-foreground">Unit price (Rs)</Label>
-                      <Input type="number" placeholder="0" value={l.unit_price || ""} onChange={(e) => {
-                        const unit_price = Number(e.target.value);
-                        setLine(i, { unit_price, priceEdited: true, pct: impliedPct(l.base, unit_price) });
-                      }} />
+                      <Input type="number" placeholder="0" value={l.unit_price || ""}
+                        onChange={(e) => {
+                          const unit_price = Number(e.target.value);
+                          // Known base -> back-compute the %. Custom item -> the
+                          // typed price becomes the base, keeping any % already
+                          // entered (applied when the field loses focus).
+                          if (l.base > 0) setLine(i, { unit_price, priceEdited: true, pct: impliedPct(l.base, unit_price) });
+                          else setLine(i, { unit_price, base: unit_price, priceEdited: true });
+                        }}
+                        onBlur={() => {
+                          if (l.pct !== 0 && l.base > 0) setLine(i, { unit_price: applyPct(l.base, l.pct) });
+                        }} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
