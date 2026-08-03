@@ -65,6 +65,15 @@ function StockAdmin() {
   };
 
   const total = lines.reduce((a, l) => a + (Number(l.quantity) || 0) * finalOf(l), 0);
+  // Units being received on this purchase, and how many different products they cover.
+  // Only lines with a product chosen count — a fresh, empty line must not read as 1 unit.
+  const totalQty = lines.reduce((a, l) => a + (l.product_id ? Number(l.quantity) || 0 : 0), 0);
+  const productKinds = new Set(lines.filter((l) => l.product_id).map((l) => l.product_id)).size;
+
+  // Running totals for every purchase listed below.
+  const historyQty = rows.reduce((a, r) => a + (Number(r.quantity) || 0), 0);
+  const historyTotal = rows.reduce((a, r) => a + (Number(r.quantity) || 0) * (Number(r.purchase_price) || 0), 0);
+  const historyKinds = new Set(rows.map((r) => r.product_id).filter(Boolean)).size;
 
   const add = async () => {
     if (!merchantId) return toast.error("Select the merchant this stock was purchased from");
@@ -248,18 +257,49 @@ function StockAdmin() {
                 </div>
               </div>
             ))}
-            <div className="flex justify-between text-sm pt-1 border-t">
-              <span className="text-muted-foreground">Total</span>
-              <b>{money(total)}</b>
+            <div className="space-y-1 pt-2 border-t">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Total quantity</span>
+                <b>{totalQty} {totalQty === 1 ? "unit" : "units"}</b>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Total amount</span>
+                <b>{money(total)}</b>
+              </div>
+              {productKinds > 0 && (
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Different products</span>
+                  <span>{productKinds}</span>
+                </div>
+              )}
             </div>
           </div>
 
           <Button onClick={add} className="w-full" disabled={saving}>
-            {saving ? "Saving..." : `Add stock (${money(total)})`}
+            {saving ? "Saving..." : `Add stock — ${totalQty} ${totalQty === 1 ? "unit" : "units"} (${money(total)})`}
           </Button>
         </div>
 
-        <div className="lg:col-span-2 rounded-2xl bg-card shadow-sm overflow-x-auto">
+        <div className="lg:col-span-2 rounded-2xl bg-card shadow-sm overflow-hidden">
+          {/* Quick glance: everything received across the purchases listed below. */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 border-b">
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Total quantity</div>
+              <div className="text-xl font-black text-primary">{historyQty}</div>
+              <div className="text-[11px] text-muted-foreground">units received</div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Total amount</div>
+              <div className="text-xl font-black">{money(historyTotal)}</div>
+              <div className="text-[11px] text-muted-foreground">{rows.length} purchase {rows.length === 1 ? "entry" : "entries"}</div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Different products</div>
+              <div className="text-xl font-black">{historyKinds}</div>
+              <div className="text-[11px] text-muted-foreground">product types</div>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
               <tr><th className="p-3">Date</th><th className="p-3">Ref</th><th className="p-3">Supplier</th><th className="p-3">Product</th><th className="p-3">Qty</th><th className="p-3">Unit cost</th><th className="p-3">Total</th></tr>
@@ -278,7 +318,18 @@ function StockAdmin() {
               ))}
               {rows.length === 0 && <tr><td colSpan={7} className="p-10 text-center text-muted-foreground">No purchases yet.</td></tr>}
             </tbody>
+            {rows.length > 0 && (
+              <tfoot>
+                <tr className="border-t-2 bg-muted/40 font-bold">
+                  <td className="p-3" colSpan={4}>Total ({historyKinds} product {historyKinds === 1 ? "type" : "types"})</td>
+                  <td className="p-3">{historyQty}</td>
+                  <td className="p-3 text-muted-foreground font-normal">—</td>
+                  <td className="p-3">{money(historyTotal)}</td>
+                </tr>
+              </tfoot>
+            )}
           </table>
+          </div>
         </div>
       </div>
     </AdminShell>
