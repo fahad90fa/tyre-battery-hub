@@ -34,14 +34,10 @@ function Recoveries() {
         supabase.from("client_ledger").select("*, clients(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
         supabase.from("merchant_ledger").select("*, merchants(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
         supabase.from("expenses").select("*").order("date_of_expense", { ascending: false }),
-        supabase.from("customer_purchases").select("purchase_date, total_price, payment_status").order("purchase_date", { ascending: false }),
+        supabase.from("invoices").select("id, invoice_id, customer_name, total_amount, created_at, client_id").order("created_at", { ascending: false }),
       ]);
       setInvPays(ip ?? []); setLedgerPays(lp ?? []); setMerchantPays(mp ?? []); setExpenses(ex ?? []); setSales(sl ?? []);
-      const refs = [...new Set((lp ?? []).map((l: any) => l.reference).filter((r: any) => typeof r === "string" && r.startsWith("INV-")))];
-      if (refs.length) {
-        const { data: refInvs } = await supabase.from("invoices").select("invoice_id, created_at").in("invoice_id", refs);
-        setInvDateMap(Object.fromEntries((refInvs ?? []).map((i) => [i.invoice_id, localDateOf(i.created_at)])));
-      }
+      setInvDateMap(Object.fromEntries((sl ?? []).map((i: any) => [i.invoice_id, localDateOf(i.created_at)])));
     })();
   }, []);
 
@@ -92,20 +88,25 @@ function Recoveries() {
     return out.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
   }, [invPays, ledgerPays, merchantPays, expenses, invDateMap]);
 
-  // Sales are NOT cash flow — kept separate so they never mix into recoveries.
+  // Sales are NOT cash flow — billed amounts, kept separate from recoveries.
   const salesByDay = useMemo(() => {
     const map = new Map<string, { net: number; cash: number; credit: number }>();
-    sales.forEach((sale) => {
-      const d = sale.purchase_date ?? "";
+    sales.forEach((inv) => {
+      const d = localDateOf(inv.created_at);
       if (!d) return;
       const cur = map.get(d) ?? { net: 0, cash: 0, credit: 0 };
-      const amt = Number(sale.total_price) || 0;
-      cur.net += amt;
-      if (sale.payment_status === "paid") cur.cash += amt; else cur.credit += amt;
+      cur.net += Number(inv.total_amount) || 0;
       map.set(d, cur);
     });
+    // Cash sales = money taken on the same day the bill was raised.
+    flows.forEach((f) => {
+      if (f.kind !== "sale-payment") return;
+      const cur = map.get(f.date);
+      if (cur) cur.cash += f.amount;
+    });
+    map.forEach((v) => { v.cash = Math.min(v.net, v.cash); v.credit = Math.max(0, v.net - v.cash); });
     return map;
-  }, [sales]);
+  }, [sales, flows]);
 
   const byDay = useMemo(() => {
     const map = new Map<string, Flow[]>();

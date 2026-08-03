@@ -6,7 +6,6 @@ import { printArea } from "@/lib/print";
 import { money, shortDate, localToday } from "@/lib/format";
 import { Letterhead } from "@/components/admin/Letterhead";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
-import { applyPct, impliedPct } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,8 +19,8 @@ export const Route = createFileRoute("/_authenticated/admin/quotations")({
   component: QuotationsAdmin,
 });
 
-type QuoteLine = { product_id: string; product_name: string; quantity: number; unit_price: number; base: number; pct: number; priceEdited?: boolean };
-const emptyLine = (): QuoteLine => ({ product_id: "", product_name: "", quantity: 1, unit_price: 0, base: 0, pct: 0 });
+type QuoteLine = { product_id: string; product_name: string; quantity: number; unit_price: number };
+const emptyLine = (): QuoteLine => ({ product_id: "", product_name: "", quantity: 1, unit_price: 0 });
 
 const STATUSES = ["draft", "sent", "accepted", "converted"] as const;
 
@@ -290,21 +289,14 @@ function QuotationsAdmin() {
                         value={l.product_id}
                         onValueChange={(v) => {
                           const p = products.find((x) => x.id === v);
-                          const base = Number(p?.selling_price ?? 0);
-                          // Fresh retail price; % is manual per transaction.
                           setLine(i, {
-                            product_id: v, product_name: p?.product_name ?? "", base,
-                            pct: 0, unit_price: base, priceEdited: false,
+                            product_id: v, product_name: p?.product_name ?? "",
+                            unit_price: Number(p?.selling_price ?? 0),
                           });
                         }}
                         placeholder={l.product_name || "Product"}
                         searchPlaceholder="Search or type any item name..."
-                        onCreate={(name) => setLine(i, {
-                          // Custom item starts unpriced — never inherit the
-                          // previously selected product's price or %.
-                          product_id: "", product_name: name,
-                          base: 0, pct: 0, unit_price: 0, priceEdited: false,
-                        })}
+                        onCreate={(name) => setLine(i, { product_id: "", product_name: name, unit_price: 0 })}
                         createLabel="Use custom item"
                       />
                     </div>
@@ -325,33 +317,10 @@ function QuotationsAdmin() {
                     <div className="space-y-1">
                       <Label className="text-[11px] text-muted-foreground">Unit price (Rs)</Label>
                       <Input type="number" placeholder="0" value={l.unit_price || ""}
-                        onChange={(e) => {
-                          const unit_price = Number(e.target.value);
-                          // Known base -> back-compute the %. Custom item -> the
-                          // typed price becomes the base, keeping any % already
-                          // entered (applied when the field loses focus).
-                          if (l.base > 0) setLine(i, { unit_price, priceEdited: true, pct: impliedPct(l.base, unit_price) });
-                          else setLine(i, { unit_price, base: unit_price, priceEdited: true });
-                        }}
-                        onBlur={() => {
-                          if (l.pct !== 0 && l.base > 0) setLine(i, { unit_price: applyPct(l.base, l.pct) });
-                        }} />
+                        onChange={(e) => setLine(i, { unit_price: Number(e.target.value) })} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Adjust % (optional)</Label>
-                      <div className="relative">
-                        <Input type="number" placeholder="0" className="pr-6 text-right" value={l.pct || ""} onChange={(e) => {
-                          const pct = Number(e.target.value) || 0;
-                          // Custom items have no saved price — treat the typed
-                          // price as the base so the % still applies.
-                          const base = l.base > 0 ? l.base : l.unit_price;
-                          setLine(i, { pct, base, unit_price: base > 0 ? applyPct(base, pct) : l.unit_price, priceEdited: true });
-                        }} />
-                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
-                      </div>
-                    </div>
                     <div className="space-y-1">
                       <Label className="text-[11px] text-muted-foreground">Line total</Label>
                       <div className="h-9 rounded-md border bg-muted/40 grid place-items-center text-sm font-bold">
@@ -359,11 +328,6 @@ function QuotationsAdmin() {
                       </div>
                     </div>
                   </div>
-                  {l.pct !== 0 && l.base > 0 && (
-                    <div className="text-[11px] text-muted-foreground">
-                      Retail {money(l.base)} {l.pct > 0 ? "+" : ""}{l.pct}% → {money(l.unit_price)}
-                    </div>
-                  )}
                 </div>
               ))}
               <div className="flex justify-between text-sm pt-1 border-t">

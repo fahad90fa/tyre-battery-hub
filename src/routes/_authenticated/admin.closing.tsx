@@ -18,70 +18,87 @@ export const Route = createFileRoute("/_authenticated/admin/closing")({
 
 function DailyClosing() {
   const [date, setDate] = useState(() => localToday());
-  const [sales, setSales] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [ledgerPays, setLedgerPays] = useState<any[]>([]);
   const [merchantPays, setMerchantPays] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [closing, setClosing] = useState<any>(null);
-  const [refMap, setRefMap] = useState<Record<string, string>>({});
+  const [invDay, setInvDay] = useState<Record<string, string>>({});
   const [history, setHistory] = useState<any[]>([]);
   const [cashInHand, setCashInHand] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
-    const [{ data: s }, { data: ip }, { data: lp }, { data: mp }, { data: ex }, { data: cl }, { data: hist }] = await Promise.all([
-      supabase.from("customer_purchases").select("*, products(product_name)").eq("purchase_date", date).order("created_at"),
-      supabase.from("invoice_payments").select("*, invoices(invoice_id, customer_name, created_at)").eq("payment_date", date),
+    // Sales come from INVOICES (the one record every sale creates) so the
+    // figures can never be blank because a secondary table missed a row.
+    const [{ data: inv }, { data: ip }, { data: lp }, { data: mp }, { data: ex }, { data: cl }, { data: hist }] = await Promise.all([
+      supabase.from("invoices").select("id, invoice_id, customer_name, total_amount, created_at, client_id"),
+      supabase.from("invoice_payments").select("*, invoices(invoice_id, customer_name, created_at, client_id)").eq("payment_date", date),
       supabase.from("client_ledger").select("*, clients(name)").eq("entry_type", "payment").eq("entry_date", date),
       supabase.from("merchant_ledger").select("*, merchants(name)").eq("entry_type", "payment").eq("entry_date", date),
       supabase.from("expenses").select("*").eq("date_of_expense", date),
       supabase.from("daily_closings").select("*").eq("closing_date", date).maybeSingle(),
       supabase.from("daily_closings").select("*").order("closing_date", { ascending: false }).limit(14),
     ]);
-    setSales(s ?? []); setPayments(ip ?? []); setLedgerPays(lp ?? []); setMerchantPays(mp ?? []); setExpenses(ex ?? []);
+    const allInvoices = inv ?? [];
+    setInvoices(allInvoices.filter((i) => localDateOf(i.created_at) === date));
+    // Which day each invoice was raised — tells a same-day sale payment
+    // apart from the recovery of an older bill.
+    setInvDay(Object.fromEntries(allInvoices.map((i) => [i.invoice_id, localDateOf(i.created_at)])));
+    setPayments(ip ?? []); setLedgerPays(lp ?? []); setMerchantPays(mp ?? []); setExpenses(ex ?? []);
     setClosing(cl ?? null); setHistory(hist ?? []);
-    // invoice dates for ledger references, to tell same-day sale payments from recoveries
-    const refs = [...new Set((lp ?? []).map((l: any) => l.reference).filter((r: any) => typeof r === "string" && r.startsWith("INV-")))];
-    if (refs.length) {
-      const { data: refInvs } = await supabase.from("invoices").select("invoice_id, created_at").in("invoice_id", refs);
-      setRefMap(Object.fromEntries((refInvs ?? []).map((i) => [i.invoice_id, localDateOf(i.created_at)])));
-    } else setRefMap({});
     setCashInHand(cl?.cash_in_hand != null ? String(cl.cash_in_hand) : "");
     setNotes(cl?.notes ?? "");
   };
+
   useEffect(() => { load(); }, [date]);
 
   const t = useMemo(() => {
-    const netSales = sales.reduce((a, s) => a + Number(s.total_price), 0);
-    const cashSales = sales.filter((s) => s.payment_status === "paid").reduce((a, s) => a + Number(s.total_price), 0);
-    const creditSales = netSales - cashSales;
+    // --- SALES (what was billed today) ---
+    const netSales = invoices.reduce((a, i) => a + Number(i.total_amount), 0);
 
-    // Money in = every account (ledger) payment + walk-in invoice payments.
-    // Account customers' invoice_payments rows are allocation records only —
-    // counting them too would double-count the same rupees.
+    // --- MONEY IN (one row per real payment, never counted twice) ---
+    // Walk-in bills are settled through invoice_payments; account customers
+    // are settled through their ledger (their invoice_payments rows are only
+    // allocation records), so each rupee is counted exactly once.
     const walkInPays = payments.filter((p) => !p.invoices?.client_id);
-    const allIn = [
-      ...walkInPays.map((p) => ({ amount: Number(p.amount), method: p.method as string, who: p.invoices?.customer_name ?? "Walk-in", ref: p.invoices?.invoice_id, isRecovery: localDateOf(p.invoices?.created_at) !== date })),
+    const cashIn = [
+      ...walkInPays.map((p) => ({
+        amount: Number(p.amount), method: p.method as string,
+        who: p.invoices?.customer_name ?? "Walk-in", ref: p.invoices?.invoice_id as string | undefined,
+        // A recovery is a payment against a bill raised on an EARLIER day.
+        isRecovery: localDateOf(p.invoices?.created_at) !== date,
+      })),
       ...ledgerPays.map((l) => {
-        const ref = typeof l.reference === "string" && l.reference.startsWith("INV-") ? l.reference : null;
-        const saleDay = ref ? refMap[ref] : undefined;
-        return { amount: Number(l.amount), method: (l.method ?? "cash") as string, who: l.clients?.name, ref: l.reference, isRecovery: !(saleDay && saleDay === date) };
+        const ref = typeof l.reference === "string" && l.reference.startsWith("INV") ? l.reference : null;
+        const day = ref ? invDay[ref] : undefined;
+        return {
+          amount: Number(l.amount), method: (l.method ?? "cash") as string,
+          who: l.clients?.name ?? "Customer", ref: l.reference as string | undefined,
+          isRecovery: !(day && day === date),
+        };
       }),
     ];
-    const totalCashIn = allIn.reduce((a, r) => a + r.amount, 0);
-    const recoveries = allIn.filter((r) => r.isRecovery).reduce((a, r) => a + r.amount, 0);
+    const totalCashIn = cashIn.reduce((a, r) => a + r.amount, 0);
+    const recoveryRows = cashIn.filter((r) => r.isRecovery);
+    const recoveries = recoveryRows.reduce((a, r) => a + r.amount, 0);
+    // Cash sales = collected today against today's bills; the rest is credit.
+    const cashSales = Math.min(netSales, totalCashIn - recoveries);
+    const creditSales = Math.max(0, netSales - cashSales);
+
     const byMethod: Record<string, number> = {};
-    allIn.forEach((r) => { byMethod[r.method] = (byMethod[r.method] ?? 0) + r.amount; });
+    cashIn.forEach((r) => { byMethod[r.method] = (byMethod[r.method] ?? 0) + r.amount; });
     const totalExpenses = expenses.reduce((a, e) => a + Number(e.amount), 0);
     const merchantOut = merchantPays.reduce((a, m) => a + Number(m.amount), 0);
     return {
       netSales, cashSales, creditSales, recoveries, totalCashIn,
       totalExpenses, merchantOut,
-      netCash: totalCashIn - totalExpenses - merchantOut, byMethod, allIn,
+      netCash: totalCashIn - totalExpenses - merchantOut,
+      byMethod, allIn: cashIn, recoveryRows,
     };
-  }, [sales, payments, ledgerPays, merchantPays, expenses, refMap, date]);
+  }, [invoices, payments, ledgerPays, merchantPays, expenses, invDay, date]);
 
   const closeDay = async () => {
     setSaving(true);
@@ -149,17 +166,17 @@ function DailyClosing() {
         </div>
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card title={`Sales (${sales.length})`}>
-            {sales.length === 0 ? <Empty /> : sales.map((s) => (
-              <Row key={s.id}
-                   left={<>{s.products?.product_name ?? "—"} × {s.quantity_purchased}<div className="text-[10px] text-muted-foreground">{s.customer_name}</div></>}
-                   right={<span className={s.payment_status === "paid" ? "text-green-600" : "text-orange-500"}>{money(s.total_price)}</span>} />
+          <Card title={`Sales (${invoices.length})`}>
+            {invoices.length === 0 ? <Empty /> : invoices.map((i) => (
+              <Row key={i.id}
+                   left={<>{i.customer_name}<div className="text-[10px] text-muted-foreground font-mono">{i.invoice_id}</div></>}
+                   right={<span>{money(i.total_amount)}</span>} />
             ))}
           </Card>
           <Card title={`Payments received (${t.allIn.length})`}>
             {t.allIn.length === 0 ? <Empty /> : t.allIn.map((p, i) => (
               <Row key={i}
-                   left={<>{p.who ?? "Walk-in"}<div className="text-[10px] text-muted-foreground">{methodLabel(p.method)}{p.ref ? ` · ${p.ref}` : ""}{p.isRecovery ? " · recovery" : ""}</div></>}
+                   left={<>{p.who ?? "Walk-in"}<div className="text-[10px] text-muted-foreground">{methodLabel(p.method)}{p.ref ? ` · ${p.ref}` : ""}{p.isRecovery ? " · recovery of an older bill" : " · today's sale"}</div></>}
                    right={<span className="text-green-600">{money(p.amount)}</span>} />
             ))}
           </Card>
