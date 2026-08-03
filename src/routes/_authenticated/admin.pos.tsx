@@ -4,7 +4,6 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
-import { applyPct, impliedPct } from "@/lib/pricing";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { InvoiceQuickView } from "@/components/admin/InvoiceQuickView";
 import { Button } from "@/components/ui/button";
@@ -18,7 +17,7 @@ export const Route = createFileRoute("/_authenticated/admin/pos")({
   component: PosPage,
 });
 
-type CartLine = { product_id: string; name: string; qty: number; price: number; base: number; pct: number; cost: number | null; stock: number };
+type CartLine = { product_id: string; name: string; qty: number; price: number; cost: number | null; stock: number };
 type PayLine = { method: string; amount: number };
 
 function PosPage() {
@@ -31,7 +30,6 @@ function PosPage() {
   const [splitMode, setSplitMode] = useState(false);
   const [payLines, setPayLines] = useState<PayLine[]>([{ method: "cash", amount: 0 }]);
   const [dueDate, setDueDate] = useState("");
-  const [billPct, setBillPct] = useState("");
   const [saving, setSaving] = useState(false);
   const [lastInvoice, setLastInvoice] = useState<string | null>(null);
   const [viewInvoice, setViewInvoice] = useState<string | null>(null);
@@ -61,10 +59,9 @@ function PosPage() {
     setCart((c) => {
       const i = c.findIndex((l) => l.product_id === p.id);
       if (i >= 0) return c.map((l, j) => (j === i ? { ...l, qty: l.qty + 1 } : l));
-      const base = Number(p.selling_price) || 0;
       return [...c, {
         product_id: p.id, name: p.product_name, qty: 1,
-        price: base, base, pct: 0, cost: p.purchase_price ?? null,
+        price: Number(p.selling_price) || 0, cost: p.purchase_price ?? null,
         stock: p.quantity_in_stock ?? 0,
       }];
     });
@@ -85,7 +82,7 @@ function PosPage() {
   };
 
   const reset = () => {
-    setCart([]); setCustomerName(""); setClientId(""); setBillPct("");
+    setCart([]); setCustomerName(""); setClientId("");
     setSplitMode(false); setPayLines([{ method: "cash", amount: 0 }]); setDueDate("");
   };
 
@@ -143,14 +140,15 @@ function PosPage() {
         }
       }
 
-      // Per-item sale rows feed the dashboard/reports.
-      await supabase.from("customer_purchases").insert(cart.map((l) => ({
+      // Per-item sale rows feed the dashboard/reports — never fail silently.
+      const { error: cpErr } = await supabase.from("customer_purchases").insert(cart.map((l) => ({
         customer_name: name, product_id: l.product_id,
         quantity_purchased: l.qty, total_price: l.qty * l.price,
         cost_price: l.cost, payment_method: methodSummary, payment_status: status,
         purchase_date: localToday(),
         payment_due_date: remaining > 0 && dueDate ? dueDate : null,
       })));
+      if (cpErr) toast.error(`Sale saved, but the sales history row failed: ${cpErr.message}`);
 
       if (clientId) {
         await supabase.from("client_ledger").insert({
@@ -243,68 +241,18 @@ function PosPage() {
                     <div className="space-y-1">
                       <div className="text-[11px] text-muted-foreground">Price (Rs)</div>
                       <Input type="number" className="h-9" placeholder="0" value={l.price || ""}
-                             onChange={(e) => {
-                               const price = Number(e.target.value);
-                               // With a known base, back-compute the %. Without one,
-                               // the typed price becomes the base and any % already
-                               // entered is applied when the field loses focus.
-                               if (l.base > 0) setCartLine(i, { price, pct: impliedPct(l.base, price) });
-                               else setCartLine(i, { price, base: price });
-                             }}
-                             onBlur={() => {
-                               if (l.pct !== 0 && l.base > 0) setCartLine(i, { price: applyPct(l.base, l.pct) });
-                             }} />
+                             onChange={(e) => setCartLine(i, { price: Number(e.target.value) })} />
                     </div>
                   </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2 items-end">
-                    <div className="space-y-1">
-                      <div className="text-[11px] text-muted-foreground whitespace-nowrap">Adjust % (optional)</div>
-                      <div className="relative">
-                        <Input type="number" className="h-9 pr-6 text-right" placeholder="0" value={l.pct || ""}
-                               onChange={(e) => {
-                                 const pct = Number(e.target.value);
-                                 // If the product has no saved price, treat the
-                                 // typed price as the base so % still applies.
-                                 const base = l.base > 0 ? l.base : l.price;
-                                 setCartLine(i, { pct, base, price: base > 0 ? applyPct(base, pct) : l.price });
-                               }} />
-                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="text-[11px] text-muted-foreground">Line total</div>
-                      <div className="h-9 rounded-md border bg-muted/40 grid place-items-center text-sm font-bold">{money(l.qty * l.price)}</div>
-                    </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="text-[11px] text-muted-foreground">Line total</div>
+                    <div className="text-sm font-bold">{money(l.qty * l.price)}</div>
                   </div>
-                  {l.pct !== 0 && l.base > 0 && (
-                    <div className="mt-1.5 text-[11px] text-muted-foreground">
-                      Retail {money(l.base)} {l.pct > 0 ? "+" : ""}{l.pct}% → {money(l.price)}
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
           )}
 
-          {cart.length > 0 && (
-            <div className="flex items-center gap-2 border-t pt-2">
-              <Label className="text-xs whitespace-nowrap">Adjust all items</Label>
-              <div className="relative w-20">
-                <Input type="number" className="h-8 pr-4 text-right" placeholder="+/-" value={billPct}
-                       onChange={(e) => setBillPct(e.target.value)} />
-                <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
-              </div>
-              <Button type="button" variant="outline" size="sm" onClick={() => {
-                const pct = Number(billPct) || 0;
-                setCart((c) => c.map((l) => {
-                  // Items with no saved price use their typed price as the base,
-                  // so "Adjust all" never skips a line.
-                  const base = l.base > 0 ? l.base : l.price;
-                  return base > 0 ? { ...l, base, pct, price: applyPct(base, pct) } : l;
-                }));
-              }}>Apply</Button>
-            </div>
-          )}
           <div className="flex justify-between items-center text-lg font-black border-t pt-2">
             <span>Total</span><span>{money(total)}</span>
           </div>
