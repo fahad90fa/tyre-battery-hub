@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { printArea } from "@/lib/print";
 import { money, shortDate, localToday, localDateOf } from "@/lib/format";
 import { methodLabel } from "@/lib/payments";
+import { sumMoney } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,10 +32,17 @@ function DailyClosing() {
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
+    // Only the chosen day's invoices — fetching the whole table risked the
+    // API row cap silently dropping today's sales once history grew.
+    const dayStart = new Date(`${date}T00:00:00`);
+    const dayEnd = new Date(`${date}T00:00:00`);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+
     // Sales come from INVOICES (the one record every sale creates) so the
     // figures can never be blank because a secondary table missed a row.
     const [{ data: inv }, { data: ip }, { data: lp }, { data: mp }, { data: ex }, { data: cl }, { data: hist }] = await Promise.all([
-      supabase.from("invoices").select("id, invoice_id, customer_name, total_amount, created_at, client_id"),
+      supabase.from("invoices").select("id, invoice_id, customer_name, total_amount, created_at, client_id")
+        .gte("created_at", dayStart.toISOString()).lt("created_at", dayEnd.toISOString()),
       supabase.from("invoice_payments").select("*, invoices(invoice_id, customer_name, created_at, client_id)").eq("payment_date", date),
       supabase.from("client_ledger").select("*, clients(name)").eq("entry_type", "payment").eq("entry_date", date),
       supabase.from("merchant_ledger").select("*, merchants(name)").eq("entry_type", "payment").eq("entry_date", date),
@@ -42,22 +50,27 @@ function DailyClosing() {
       supabase.from("daily_closings").select("*").eq("closing_date", date).maybeSingle(),
       supabase.from("daily_closings").select("*").order("closing_date", { ascending: false }).limit(14),
     ]);
-    const allInvoices = inv ?? [];
-    setInvoices(allInvoices.filter((i) => localDateOf(i.created_at) === date));
-    // Which day each invoice was raised — tells a same-day sale payment
-    // apart from the recovery of an older bill.
-    setInvDay(Object.fromEntries(allInvoices.map((i) => [i.invoice_id, localDateOf(i.created_at)])));
+    setInvoices(inv ?? []);
     setPayments(ip ?? []); setLedgerPays(lp ?? []); setMerchantPays(mp ?? []); setExpenses(ex ?? []);
     setClosing(cl ?? null); setHistory(hist ?? []);
     setCashInHand(cl?.cash_in_hand != null ? String(cl.cash_in_hand) : "");
     setNotes(cl?.notes ?? "");
+
+    // Which day each referenced invoice was raised — tells a same-day sale
+    // payment apart from the recovery of an older bill.
+    const refs = [...new Set((lp ?? [])
+      .map((l: any) => l.reference)
+      .filter((r: any) => typeof r === "string" && r.startsWith("INV")))] as string[];
+    if (refs.length === 0) { setInvDay({}); return; }
+    const { data: refInv } = await supabase.from("invoices").select("invoice_id, created_at").in("invoice_id", refs);
+    setInvDay(Object.fromEntries((refInv ?? []).map((i) => [i.invoice_id, localDateOf(i.created_at)])));
   };
 
   useEffect(() => { load(); }, [date]);
 
   const t = useMemo(() => {
     // --- SALES (what was billed today) ---
-    const netSales = invoices.reduce((a, i) => a + Number(i.total_amount), 0);
+    const netSales = sumMoney(invoices.map((i) => i.total_amount));
 
     // --- MONEY IN (one row per real payment, never counted twice) ---
     // Walk-in bills are settled through invoice_payments; account customers
@@ -81,21 +94,21 @@ function DailyClosing() {
         };
       }),
     ];
-    const totalCashIn = cashIn.reduce((a, r) => a + r.amount, 0);
+    const totalCashIn = sumMoney(cashIn.map((r) => r.amount));
     const recoveryRows = cashIn.filter((r) => r.isRecovery);
-    const recoveries = recoveryRows.reduce((a, r) => a + r.amount, 0);
+    const recoveries = sumMoney(recoveryRows.map((r) => r.amount));
     // Cash sales = collected today against today's bills; the rest is credit.
     const cashSales = Math.min(netSales, totalCashIn - recoveries);
     const creditSales = Math.max(0, netSales - cashSales);
 
     const byMethod: Record<string, number> = {};
-    cashIn.forEach((r) => { byMethod[r.method] = (byMethod[r.method] ?? 0) + r.amount; });
-    const totalExpenses = expenses.reduce((a, e) => a + Number(e.amount), 0);
-    const merchantOut = merchantPays.reduce((a, m) => a + Number(m.amount), 0);
+    cashIn.forEach((r) => { byMethod[r.method] = sumMoney([byMethod[r.method] ?? 0, r.amount]); });
+    const totalExpenses = sumMoney(expenses.map((e) => e.amount));
+    const merchantOut = sumMoney(merchantPays.map((m) => m.amount));
     return {
       netSales, cashSales, creditSales, recoveries, totalCashIn,
       totalExpenses, merchantOut,
-      netCash: totalCashIn - totalExpenses - merchantOut,
+      netCash: sumMoney([totalCashIn, -totalExpenses, -merchantOut]),
       byMethod, allIn: cashIn, recoveryRows,
     };
   }, [invoices, payments, ledgerPays, merchantPays, expenses, invDay, date]);
@@ -147,10 +160,10 @@ function DailyClosing() {
           <Kpi icon={HandCoins} label="Recoveries (old udhar)" value={money(t.recoveries)} green />
         </div>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <Kpi icon={Wallet} label="Total cash in" value={money(t.totalCashIn)} green />
+          <Kpi icon={Wallet} label="Total amount in" value={money(t.totalCashIn)} green />
           <Kpi icon={TrendingDown} label="Merchant payments" value={money(t.merchantOut)} accent={t.merchantOut > 0} />
           <Kpi icon={TrendingDown} label="Expenses" value={money(t.totalExpenses)} accent={t.totalExpenses > 0} />
-          <Kpi icon={Wallet} label="Net cash (in − out)" value={money(t.netCash)} green={t.netCash >= 0} accent={t.netCash < 0} />
+          <Kpi icon={Wallet} label="Net amount (in − out)" value={money(t.netCash)} green={t.netCash >= 0} accent={t.netCash < 0} />
           <div className="rounded-2xl bg-card p-4 shadow-sm">
             <div className="text-[10px] uppercase text-muted-foreground tracking-wider">Received by method</div>
             <div className="mt-1 space-y-0.5">
@@ -223,7 +236,7 @@ function DailyClosing() {
           <div className="p-4 font-semibold border-b">Previous closings</div>
           <table className="w-full min-w-[560px] text-sm">
             <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
-              <tr><th className="p-3">Date</th><th className="p-3">Sales</th><th className="p-3">Cash in</th><th className="p-3">Expenses</th><th className="p-3">Net</th><th className="p-3">In hand</th></tr>
+              <tr><th className="p-3">Date</th><th className="p-3">Sales</th><th className="p-3">Amount in</th><th className="p-3">Expenses</th><th className="p-3">Net</th><th className="p-3">In hand</th></tr>
             </thead>
             <tbody>
               {history.map((h) => (

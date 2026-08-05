@@ -1,6 +1,13 @@
+/** Rupees, with paise shown only when the amount actually has them.
+ *  Rs 12,500 stays "Rs 12,500"; 26139.6 prints as "Rs 26,139.60" instead of
+ *  being silently rounded to Rs 26,140. */
 export const money = (n: number | string | null | undefined) => {
-  const v = typeof n === "string" ? Number(n) : n ?? 0;
-  return "Rs " + ((v ?? 0) + 0).toLocaleString("en-PK", { maximumFractionDigits: 0 });
+  const v = Math.round((Number(n) || 0) * 100) / 100;
+  const decimals = Number.isInteger(v) ? 0 : 2;
+  return "Rs " + v.toLocaleString("en-PK", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
 };
 
 export const shortDate = (s: string | Date | null | undefined) => {

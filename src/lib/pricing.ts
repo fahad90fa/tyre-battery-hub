@@ -3,17 +3,25 @@
  * a bill can add or deduct a percentage per transaction.
  * pct is signed: +10 adds 10%, -5 deducts 5%.
  *
- * Precision: computed to 2 decimals (paise) using integer math so that
- * values like 12,500 never drift to 12,499 from floating-point rounding.
+ * Precision: the exact figure is kept to the paisa. Rounding to whole rupees
+ * silently changed the amount (24,660 +6% is 26,139.60, not 26,140) and those
+ * few rupees add up over a bulk purchase.
  */
+
+/** Round to the nearest paisa without float drift (0.1 + 0.2 problems). */
+export const toPaisa = (n: number | string | null | undefined) =>
+  Math.round((Number(n) || 0) * 100) / 100;
+
+/** Sum a list of amounts and keep the result exact to the paisa. */
+export const sumMoney = (values: Array<number | string | null | undefined>) =>
+  values.reduce((a: number, v) => a + Math.round((Number(v) || 0) * 100), 0) / 100;
+
 export const applyPct = (base: number, pct: number) => {
   const b = Number(base) || 0;
   const p = Number(pct) || 0;
-  if (p === 0) return b;                       // no % -> price is the base, untouched
-  // Whole rupees: every screen and print shows rupees, so the stored figure
-  // must match exactly (paise would make totals disagree by a rupee).
-  // Integer math on paise first avoids float drift (12500 * 1.1 -> 13750).
-  return Math.round(Math.round(b * 100 * (1 + p / 100)) / 100);
+  if (p === 0) return toPaisa(b);              // no % -> price is the base, untouched
+  // Work in paise so 24660 +6% lands on 26139.60 exactly, with no float tail.
+  return Math.round(Math.round(b * 100) * (1 + p / 100)) / 100;
 };
 
 /** Reverse: what percentage turns `base` into `price` (1 decimal). */

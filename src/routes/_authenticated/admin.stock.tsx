@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
-import { applyPct } from "@/lib/pricing";
+import { applyPct, sumMoney } from "@/lib/pricing";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -33,12 +33,16 @@ function StockAdmin() {
   const [lines, setLines] = useState<PurchaseLine[]>([emptyLine()]);
   const [saving, setSaving] = useState(false);
 
+  const [loadError, setLoadError] = useState("");
+
   const load = async () => {
-    const [{ data: r }, { data: p }, { data: m }] = await Promise.all([
+    const [{ data: r, error: rErr }, { data: p }, { data: m }] = await Promise.all([
       supabase.from("stock_purchases").select("*, products(product_name)").order("date", { ascending: false }).order("created_at", { ascending: false }),
       supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price, selling_price"),
       supabase.from("merchants").select("id, name, account_no").order("name"),
     ]);
+    // An empty list used to look identical to a failed query. Say which it is.
+    setLoadError(rErr ? rErr.message : "");
     setRows(r ?? []); setProducts(p ?? []); setMerchants(m ?? []);
   };
   useEffect(() => { load(); }, []);
@@ -64,7 +68,7 @@ function StockAdmin() {
     }
   };
 
-  const total = lines.reduce((a, l) => a + (Number(l.quantity) || 0) * finalOf(l), 0);
+  const total = sumMoney(lines.map((l) => (Number(l.quantity) || 0) * finalOf(l)));
   // Units being received on this purchase, and how many different products they cover.
   // Only lines with a product chosen count — a fresh, empty line must not read as 1 unit.
   const totalQty = lines.reduce((a, l) => a + (l.product_id ? Number(l.quantity) || 0 : 0), 0);
@@ -72,7 +76,7 @@ function StockAdmin() {
 
   // Running totals for every purchase listed below.
   const historyQty = rows.reduce((a, r) => a + (Number(r.quantity) || 0), 0);
-  const historyTotal = rows.reduce((a, r) => a + (Number(r.quantity) || 0) * (Number(r.purchase_price) || 0), 0);
+  const historyTotal = sumMoney(rows.map((r) => (Number(r.quantity) || 0) * (Number(r.purchase_price) || 0)));
   const historyKinds = new Set(rows.map((r) => r.product_id).filter(Boolean)).size;
 
   const add = async () => {
@@ -88,7 +92,7 @@ function StockAdmin() {
     if (valid.some((l) => !(finalOf(l) > 0)))
       return toast.error("Enter a base / list price for every item line");
     const supplier = supplierName || merchants.find((m) => m.id === merchantId)?.name || "";
-    const validTotal = valid.reduce((a, l) => a + Number(l.quantity) * finalOf(l), 0);
+    const validTotal = sumMoney(valid.map((l) => Number(l.quantity) * finalOf(l)));
 
     setSaving(true);
     try {
@@ -139,8 +143,8 @@ function StockAdmin() {
 
   return (
     <AdminShell title="Stock Purchases">
-      <div className="grid lg:grid-cols-3 gap-4">
-        <div className="rounded-2xl bg-card p-5 shadow-sm space-y-3">
+      <div className="grid lg:grid-cols-5 gap-4">
+        <div className="lg:col-span-2 rounded-2xl bg-card p-5 shadow-sm space-y-3">
           <div className="font-semibold">Log purchase from merchant</div>
           <div className="space-y-1.5"><Label>Merchant <span className="text-destructive">*</span></Label>
             <SearchableSelect
@@ -200,7 +204,7 @@ function StockAdmin() {
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Base / list price (Rs)</Label>
-                    <Input type="number" placeholder="0" value={l.base || ""} onChange={(e) => {
+                    <Input type="number" step="any" placeholder="0" value={l.base || ""} onChange={(e) => {
                       const base = Number(e.target.value) || 0;
                       // Final price always follows the base (with % if one is set).
                       setLine(i, { base, unit_cost: base > 0 ? applyPct(base, l.pct) : 0 });
@@ -209,7 +213,7 @@ function StockAdmin() {
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Adjust % (optional)</Label>
                     <div className="relative">
-                      <Input type="number" placeholder="0" className="pr-6 text-right" value={l.pct || ""} onChange={(e) => {
+                      <Input type="number" step="any" placeholder="0" className="pr-6 text-right" value={l.pct || ""} onChange={(e) => {
                         const pct = Number(e.target.value) || 0;
                         // % is optional: with no base yet, treat the typed final
                         // price as the base so the adjustment still applies.
@@ -242,7 +246,7 @@ function StockAdmin() {
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Override</Label>
-                    <Input type="number" placeholder="0" value={l.unit_cost || ""} onChange={(e) => {
+                    <Input type="number" step="any" placeholder="0" value={l.unit_cost || ""} onChange={(e) => {
                       // Typing a price directly makes it the base with no %.
                       const unit_cost = Number(e.target.value) || 0;
                       setLine(i, { unit_cost, base: unit_cost, pct: 0 });
@@ -280,8 +284,14 @@ function StockAdmin() {
           </Button>
         </div>
 
-        <div className="lg:col-span-2 rounded-2xl bg-card shadow-sm overflow-hidden">
+        <div className="lg:col-span-3 rounded-2xl bg-card shadow-sm overflow-hidden">
           {/* Quick glance: everything received across the purchases listed below. */}
+          <div className="px-4 pt-4">
+            <div className="font-semibold text-sm">Stock received (all purchases)</div>
+            <div className="text-xs text-muted-foreground">
+              Every item ever booked in from a merchant — what came in, when, from whom and at what cost.
+            </div>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 border-b">
             <div>
               <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Total quantity</div>
@@ -316,7 +326,13 @@ function StockAdmin() {
                   <td className="p-3 font-semibold">{money(Number(r.purchase_price) * r.quantity)}</td>
                 </tr>
               ))}
-              {rows.length === 0 && <tr><td colSpan={7} className="p-10 text-center text-muted-foreground">No purchases yet.</td></tr>}
+              {rows.length === 0 && (
+                <tr><td colSpan={7} className="p-10 text-center text-sm">
+                  {loadError
+                    ? <span className="text-destructive">Could not load purchases: {loadError}</span>
+                    : <span className="text-muted-foreground">No purchases recorded yet. Log one on the left and it will appear here.</span>}
+                </td></tr>
+              )}
             </tbody>
             {rows.length > 0 && (
               <tfoot>

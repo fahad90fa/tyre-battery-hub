@@ -43,6 +43,15 @@ const INCREASES: Record<PartyKind, string[]> = {
   merchants: ["purchase", "credit"],
   clients: ["sale", "debit"],
 };
+// Short, plain-language name for a ledger row.
+const SHORT_LABEL: Record<string, string> = {
+  sale: "Sale (udhar)",
+  purchase: "Purchase",
+  payment: "Payment",
+  credit: "Credit",
+  debit: "Debit adjustment",
+};
+const shortLabel = (t: string) => SHORT_LABEL[t] ?? t;
 
 const empty = { name: "", phone: "", email: "", address: "", cnic: "", opening_balance: 0, notes: "" };
 
@@ -196,9 +205,15 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
   );
 }
 
+const blankEntry = (kind: PartyKind) => ({
+  entry_type: TYPES[kind][0].value, amount: 0, method: "cash",
+  reference: "", note: "", entry_date: localToday(),
+});
+
 function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; onChanged: () => void }) {
   const [entries, setEntries] = useState<any[]>([]);
-  const [form, setForm] = useState({ entry_type: TYPES[kind][0].value, amount: 0, method: "cash", reference: "", note: "" });
+  const [addOpen, setAddOpen] = useState(false);
+  const [form, setForm] = useState(() => blankEntry(kind));
   const [current, setCurrent] = useState<number>(party.current_balance);
   const [overdueInvoices, setOverdueInvoices] = useState<any[]>([]);
   const [viewInvoice, setViewInvoice] = useState<string | null>(null);
@@ -224,7 +239,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
   // When a customer pays into their account, spread the amount over their
   // outstanding invoices (oldest first) so invoice statuses flip to
   // paid/partial automatically — no manual status changes needed.
-  const allocateToInvoices = async (amount: number, method: string) => {
+  const allocateToInvoices = async (amount: number, method: string, payDate: string) => {
     const { data: invs } = await supabase.from("invoices")
       .select("id, invoice_id, total_amount, payment_status, created_at")
       .eq("client_id", party.id).neq("payment_status", "paid")
@@ -244,7 +259,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
       }
       const alloc = Math.min(bal, remaining);
       const { error: payErr } = await supabase.from("invoice_payments").insert({
-        invoice_id: inv.id, amount: alloc, method, payment_date: localToday(),
+        invoice_id: inv.id, amount: alloc, method, payment_date: payDate,
         note: "Auto-allocated from account payment",
       });
       if (payErr) { toast.error(payErr.message); break; }
@@ -258,20 +273,23 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
   const add = async () => {
     if (!form.amount || Number(form.amount) <= 0) return toast.error("Amount required");
     const isPayment = form.entry_type === "payment";
+    const entryDate = form.entry_date || localToday();
     const { error } = await (supabase.from(LEDGER_TABLE[kind]) as any).insert({
       entry_type: form.entry_type, amount: Number(form.amount),
       method: isPayment ? form.method : null,
       reference: form.reference, note: form.note,
-      entry_date: localToday(),
+      entry_date: entryDate,
       [FK[kind]]: party.id,
     });
     if (error) return toast.error(error.message);
     if (kind === "clients" && isPayment) {
-      const touched = await allocateToInvoices(Number(form.amount), form.method);
+      const touched = await allocateToInvoices(Number(form.amount), form.method, entryDate);
       if (touched > 0) toast.success(`Payment applied to ${touched} invoice${touched > 1 ? "s" : ""} automatically`);
     }
-    setForm({ entry_type: TYPES[kind][0].value, amount: 0, method: "cash", reference: "", note: "" });
-    toast.success("Entry added"); load(); onChanged();
+    setForm(blankEntry(kind));
+    setAddOpen(false);
+    toast.success(`${shortLabel(form.entry_type)} of ${money(Number(form.amount))} recorded on ${shortDate(entryDate)}`);
+    load(); onChanged();
   };
   const del = async (id: string) => {
     if (!confirm("Remove this entry?")) return;
@@ -318,91 +336,160 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
           <div className="text-xs font-semibold text-destructive mb-2">Pending invoices</div>
           {overdueInvoices.map((i) => (
             <button key={i.id} onClick={() => setViewInvoice(i.invoice_id)}
-                    className="w-full flex justify-between items-center text-xs py-1.5 border-b last:border-0 hover:bg-destructive/10 rounded px-1 -mx-1 text-left">
-              <span className="font-mono underline decoration-dotted">{i.invoice_id}</span>
-              <span className="text-muted-foreground">{shortDate(i.created_at)}</span>
-              <span>{money(i.total_amount)}</span>
-              <span className={i.due_date && i.due_date < today ? "text-destructive font-semibold" : "text-muted-foreground"}>
-                {i.due_date ? (i.due_date < today ? `overdue ${shortDate(i.due_date)}` : `due ${shortDate(i.due_date)}`) : "no due date"}
+                    className="w-full flex items-center justify-between gap-3 text-xs py-2 border-b last:border-0 hover:bg-destructive/10 rounded px-1 -mx-1 text-left">
+              <span className="min-w-0">
+                <span className="block font-mono underline decoration-dotted truncate">{i.invoice_id}</span>
+                <span className="block text-muted-foreground">
+                  {shortDate(i.created_at)}
+                  {" · "}
+                  <span className={i.due_date && i.due_date < today ? "text-destructive font-semibold" : ""}>
+                    {i.due_date ? (i.due_date < today ? `overdue ${shortDate(i.due_date)}` : `due ${shortDate(i.due_date)}`) : "no due date"}
+                  </span>
+                </span>
               </span>
+              <span className="font-bold whitespace-nowrap">{money(i.total_amount)}</span>
             </button>
           ))}
           <div className="text-[10px] text-muted-foreground mt-1">Tap an invoice to see its full details.</div>
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2 rounded-xl border p-4">
-        <div className="col-span-2 font-semibold text-sm">Add entry</div>
-        <div className={isPaymentType ? "space-y-1.5" : "col-span-2 space-y-1.5"}>
-          <Label>Type</Label>
-          <Select value={form.entry_type} onValueChange={(v) => setForm({ ...form, entry_type: v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>{TYPES[kind].map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
-          </Select>
+      {/* One button instead of a permanent form — keeps the account clean to
+          read and to screenshot. Everything (sale, payment, credit, debit)
+          lives inside the dialog. */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="font-semibold text-sm">Transaction history</div>
+        <div className="flex items-center gap-2">
+          <Dialog open={addOpen} onOpenChange={(o) => { setAddOpen(o); if (o) setForm(blankEntry(kind)); }}>
+            <DialogTrigger asChild>
+              <Button size="sm"><Plus className="h-4 w-4 mr-1.5" /> Add entry</Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader><DialogTitle>Add entry — {party.name}</DialogTitle></DialogHeader>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2 space-y-1.5">
+                  <Label>What is this entry?</Label>
+                  <Select value={form.entry_type} onValueChange={(v) => setForm({ ...form, entry_type: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{TYPES[kind].map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Amount</Label>
+                  <Input type="number" step="any" autoFocus value={form.amount || ""}
+                         onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Date</Label>
+                  <Input type="date" value={form.entry_date}
+                         onChange={(e) => setForm({ ...form, entry_date: e.target.value })} />
+                </div>
+                {isPaymentType && (
+                  <div className="col-span-2 space-y-1.5">
+                    <Label>Paid by</Label>
+                    <Select value={form.method} onValueChange={(v) => setForm({ ...form, method: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>{PAYMENT_METHODS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <div className="col-span-2 space-y-1.5">
+                  <Label>Reference <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                  <Input value={form.reference} placeholder="Invoice / slip number"
+                         onChange={(e) => setForm({ ...form, reference: e.target.value })} />
+                </div>
+                <div className="col-span-2 space-y-1.5">
+                  <Label>Note <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                  <Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+                </div>
+              </div>
+              <Button className="w-full mt-1" onClick={add}>Save entry</Button>
+            </DialogContent>
+          </Dialog>
+          <Button variant="outline" size="sm" onClick={() => printArea()}>
+            <Printer className="h-4 w-4 mr-1.5" /> Print
+          </Button>
         </div>
-        {isPaymentType && (
-          <div className="space-y-1.5">
-            <Label>Method</Label>
-            <Select value={form.method} onValueChange={(v) => setForm({ ...form, method: v })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{PAYMENT_METHODS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-        )}
-        <div className="space-y-1.5"><Label>Amount</Label><Input type="number" value={form.amount || ""} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} /></div>
-        <div className="space-y-1.5"><Label>Reference</Label><Input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></div>
-        <div className="col-span-2 space-y-1.5"><Label>Note</Label><Input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></div>
-        <Button className="col-span-2" onClick={add}>Add entry</Button>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="font-semibold text-sm">Transaction history</div>
-        <Button variant="outline" size="sm" onClick={() => printArea()}>
-          <Printer className="h-4 w-4 mr-2" /> Print ledger
-        </Button>
-      </div>
-      <div className="print-area rounded-xl border overflow-x-auto">
+      <div className="print-area rounded-xl border overflow-hidden">
         <div className="hidden print:block border-b-2 border-black pb-2 mb-3">
           <div className="text-lg font-black">MT&B HOUSE — Account Ledger</div>
           <div className="text-sm">
             {party.name}{party.account_no ? ` (${party.account_no})` : ""} · Balance due {money(current)}
           </div>
         </div>
-        <table className="w-full min-w-[560px] text-sm">
-          <thead className="bg-muted text-xs uppercase text-muted-foreground text-left">
-            <tr><th className="p-2">Date</th><th className="p-2">Type</th><th className="p-2">Method</th><th className="p-2">Amount</th><th className="p-2">Balance</th><th className="p-2">Ref</th><th className="p-2"></th></tr>
+
+        {/* Screen: one clean, readable card per transaction. */}
+        <div className="divide-y print:hidden">
+          {entries.map((e) => {
+            const up = INCREASES[kind].includes(e.entry_type);
+            const hasInvoice = kind === "clients" && typeof e.reference === "string" && e.reference.startsWith("INV");
+            const hasPurchase = kind === "merchants" && typeof e.reference === "string" && e.reference.startsWith("PUR");
+            const clickable = hasInvoice || hasPurchase;
+            return (
+              <div key={e.id}
+                   className={`px-3 py-3 sm:px-4 ${clickable ? "cursor-pointer hover:bg-muted/40" : ""}`}
+                   onClick={() => { if (hasInvoice) setViewInvoice(e.reference); if (hasPurchase) setViewPurchase(e.reference); }}
+                   title={clickable ? "Open full details" : undefined}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ${up ? "bg-orange-500/10 text-orange-500" : "bg-green-600/10 text-green-600"}`}>
+                        {shortLabel(e.entry_type)}
+                      </span>
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {shortDate(e.entry_date ?? e.created_at)}
+                      </span>
+                    </div>
+                    <div className="text-sm">
+                      {e.method ? <span className="font-medium">{methodLabel(e.method)}</span> : null}
+                      {e.method && e.reference ? <span className="text-muted-foreground"> · </span> : null}
+                      {e.reference
+                        ? <span className={`font-mono text-xs ${clickable ? "text-primary underline decoration-dotted" : "text-muted-foreground"}`}>{e.reference}</span>
+                        : null}
+                      {!e.method && !e.reference ? <span className="text-muted-foreground text-xs">No reference</span> : null}
+                    </div>
+                    {e.note && <div className="text-xs text-muted-foreground">{e.note}</div>}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className={`text-base font-black whitespace-nowrap ${up ? "text-orange-500" : "text-green-600"}`}>
+                      {up ? "+" : "−"}{money(e.amount)}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground whitespace-nowrap">
+                      Balance {money(withRunning[e.id] ?? 0)}
+                    </div>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 mt-0.5 text-muted-foreground"
+                            onClick={(ev) => { ev.stopPropagation(); del(e.id); }}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {entries.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">No entries yet.</div>}
+        </div>
+
+        {/* Print: the same rows as a compact table, which reads better on paper. */}
+        <table className="hidden print:table w-full text-sm">
+          <thead className="text-xs uppercase text-left border-b">
+            <tr><th className="p-2">Date</th><th className="p-2">Type</th><th className="p-2">Method</th><th className="p-2">Ref</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Balance</th></tr>
           </thead>
           <tbody>
             {entries.map((e) => {
               const up = INCREASES[kind].includes(e.entry_type);
-              const hasInvoice = kind === "clients" && typeof e.reference === "string" && e.reference.startsWith("INV");
-              const hasPurchase = kind === "merchants" && typeof e.reference === "string" && e.reference.startsWith("PUR");
-              const clickable = hasInvoice || hasPurchase;
               return (
-                <tr key={e.id}
-                    className={`border-t ${clickable ? "cursor-pointer hover:bg-muted/50" : ""}`}
-                    onClick={() => { if (hasInvoice) setViewInvoice(e.reference); if (hasPurchase) setViewPurchase(e.reference); }}
-                    title={clickable ? "Open full details" : undefined}>
+                <tr key={e.id} className="border-t">
                   <td className="p-2 whitespace-nowrap">{shortDate(e.entry_date ?? e.created_at)}</td>
-                  <td className="p-2">
-                    <span className={up ? "text-orange-500" : "text-green-600"}>{e.entry_type}</span>
-                    {e.note && <div className="text-[10px] text-muted-foreground">{e.note}</div>}
-                  </td>
-                  <td className="p-2 text-muted-foreground">{e.method ? methodLabel(e.method) : "—"}</td>
-                  <td className={`p-2 font-semibold whitespace-nowrap ${up ? "text-orange-500" : "text-green-600"}`}>{up ? "+" : "−"}{money(e.amount)}</td>
-                  <td className="p-2 font-medium whitespace-nowrap">{money(withRunning[e.id] ?? 0)}</td>
-                  <td className="p-2 text-muted-foreground">
-                    {hasInvoice || hasPurchase
-                      ? <span className="font-mono text-xs underline decoration-dotted text-primary">{e.reference}</span>
-                      : (e.reference || "—")}
-                  </td>
-                  <td className="p-2 text-right" onClick={(ev) => ev.stopPropagation()}>
-                    <Button variant="ghost" size="icon" onClick={() => del(e.id)}><Trash2 className="h-4 w-4" /></Button>
-                  </td>
+                  <td className="p-2">{shortLabel(e.entry_type)}{e.note ? <div className="text-[10px]">{e.note}</div> : null}</td>
+                  <td className="p-2">{e.method ? methodLabel(e.method) : "—"}</td>
+                  <td className="p-2 font-mono text-xs">{e.reference || "—"}</td>
+                  <td className="p-2 text-right whitespace-nowrap">{up ? "+" : "−"}{money(e.amount)}</td>
+                  <td className="p-2 text-right whitespace-nowrap">{money(withRunning[e.id] ?? 0)}</td>
                 </tr>
               );
             })}
-            {entries.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">No entries yet.</td></tr>}
           </tbody>
         </table>
       </div>
