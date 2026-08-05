@@ -19,6 +19,11 @@ export const Route = createFileRoute("/_authenticated/admin/closing")({
 
 function DailyClosing() {
   const [date, setDate] = useState(() => localToday());
+  const yesterday = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return localDateOf(d);
+  }, []);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [ledgerPays, setLedgerPays] = useState<any[]>([]);
@@ -130,7 +135,7 @@ function DailyClosing() {
         ? await supabase.from("daily_closings").update(payload).eq("id", closing.id)
         : await supabase.from("daily_closings").insert(payload);
       if (error) return toast.error(error.message);
-      toast.success(closing ? "Closing updated" : `Day ${shortDate(date)} closed`);
+      toast.success(closing ? `Closing for ${shortDate(date)} updated` : `Day ${shortDate(date)} closed & saved`);
       load();
     } finally {
       setSaving(false);
@@ -139,13 +144,27 @@ function DailyClosing() {
 
   return (
     <AdminShell title="Daily Closing">
+      {/* The date is fully manual: close today, yesterday, or any date —
+          every figure on the page follows whatever is picked here. */}
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap print:hidden">
-        <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-44" />
+        <div className="flex items-end gap-2 flex-wrap">
+          <div className="space-y-1">
+            <Label className="text-[11px] text-muted-foreground">Closing date — pick any day</Label>
+            <Input type="date" value={date} max={localToday()} onChange={(e) => e.target.value && setDate(e.target.value)} className="w-44" />
+          </div>
+          <Button variant={date === yesterday ? "default" : "outline"} size="sm" onClick={() => setDate(yesterday)}>Yesterday</Button>
+          <Button variant={date === localToday() ? "default" : "outline"} size="sm" onClick={() => setDate(localToday())}>Today</Button>
+        </div>
         <div className="flex items-center gap-2">
           {closing && <span className="text-xs rounded-full bg-green-600/10 text-green-600 px-3 py-1 font-semibold">Closed ✓</span>}
           <Button variant="outline" onClick={() => printArea()}><Printer className="h-4 w-4 mr-2" /> Print report</Button>
         </div>
       </div>
+      {date !== localToday() && (
+        <div className="mb-4 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm print:hidden">
+          You are viewing and closing <b>{shortDate(date)}</b>, not today. All figures and the saved report belong to that date.
+        </div>
+      )}
 
       <div className="print-area space-y-4">
         <div className="hidden print:block text-center border-b-2 border-foreground pb-2">
@@ -212,12 +231,17 @@ function DailyClosing() {
 
       <div className="mt-4 grid lg:grid-cols-2 gap-4 print:hidden">
         <div className="rounded-2xl bg-card p-5 shadow-sm space-y-3">
-          <div className="font-semibold flex items-center gap-2"><Lock className="h-4 w-4 text-gold" /> {closing ? "Update closing" : "Close the day"}</div>
+          <div className="font-semibold flex items-center gap-2">
+            <Lock className="h-4 w-4 text-gold" /> {closing ? "Update closing" : "Close the day"} — {shortDate(date)}
+          </div>
           <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5"><Label>Closing date</Label>
+              <Input type="date" value={date} max={localToday()} onChange={(e) => e.target.value && setDate(e.target.value)} />
+            </div>
             <div className="space-y-1.5"><Label>Cash in hand (counted)</Label>
               <Input type="number" value={cashInHand} onChange={(e) => setCashInHand(e.target.value)} placeholder={String(t.netCash)} />
             </div>
-            <div className="rounded-xl bg-primary/5 p-3">
+            <div className="rounded-xl bg-primary/5 p-3 col-span-2">
               <div className="text-[10px] uppercase text-muted-foreground tracking-wider">Difference vs net cash</div>
               <div className={`text-lg font-black ${cashInHand === "" ? "text-muted-foreground" : Number(cashInHand) - t.netCash === 0 ? "text-green-600" : "text-destructive"}`}>
                 {cashInHand === "" ? "—" : money(Number(cashInHand) - t.netCash)}
@@ -228,7 +252,7 @@ function DailyClosing() {
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Anything unusual today..." />
           </div>
           <Button className="w-full" onClick={closeDay} disabled={saving}>
-            {saving ? "Saving..." : closing ? "Update closing report" : "Close the day & save report"}
+            {saving ? "Saving..." : `${closing ? "Update closing for" : "Close & save"} ${shortDate(date)}`}
           </Button>
         </div>
 
