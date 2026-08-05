@@ -4,7 +4,10 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate, localToday, localDateOf } from "@/lib/format";
 import { methodLabel } from "@/lib/payments";
-import { HandCoins, Store, TrendingDown, TrendingUp, Wallet, CalendarDays, Banknote, CreditCard } from "lucide-react";
+import { sumMoney } from "@/lib/pricing";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { HandCoins, Store, TrendingDown, TrendingUp, Wallet, CalendarDays, Banknote, CreditCard, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/admin/recoveries")({
   component: Recoveries,
@@ -26,20 +29,29 @@ function Recoveries() {
   const [expenses, setExpenses] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
   const [invDateMap, setInvDateMap] = useState<Record<string, string>>({});
+  const [loadError, setLoadError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [show, setShow] = useState<"all" | "recovery" | "in" | "out">("all");
+  const [month, setMonth] = useState("");            // "" = every month
 
-  useEffect(() => {
-    (async () => {
-      const [{ data: ip }, { data: lp }, { data: mp }, { data: ex }, { data: sl }] = await Promise.all([
-        supabase.from("invoice_payments").select("*, invoices(invoice_id, customer_name, created_at, client_id)").order("payment_date", { ascending: false }),
-        supabase.from("client_ledger").select("*, clients(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
-        supabase.from("merchant_ledger").select("*, merchants(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
-        supabase.from("expenses").select("*").order("date_of_expense", { ascending: false }),
-        supabase.from("invoices").select("id, invoice_id, customer_name, total_amount, created_at, client_id").order("created_at", { ascending: false }),
-      ]);
-      setInvPays(ip ?? []); setLedgerPays(lp ?? []); setMerchantPays(mp ?? []); setExpenses(ex ?? []); setSales(sl ?? []);
-      setInvDateMap(Object.fromEntries((sl ?? []).map((i: any) => [i.invoice_id, localDateOf(i.created_at)])));
-    })();
-  }, []);
+  const load = async () => {
+    setLoading(true);
+    const [ipR, lpR, mpR, exR, slR] = await Promise.all([
+      supabase.from("invoice_payments").select("*, invoices(invoice_id, customer_name, created_at, client_id)").order("payment_date", { ascending: false }),
+      supabase.from("client_ledger").select("*, clients(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
+      supabase.from("merchant_ledger").select("*, merchants(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
+      supabase.from("expenses").select("*").order("date_of_expense", { ascending: false }),
+      supabase.from("invoices").select("id, invoice_id, customer_name, total_amount, created_at, client_id").order("created_at", { ascending: false }),
+    ]);
+    // Never show an empty page when a query actually failed.
+    setLoadError([ipR.error, lpR.error, mpR.error, exR.error, slR.error]
+      .filter(Boolean).map((e) => e!.message).join(" · "));
+    setInvPays(ipR.data ?? []); setLedgerPays(lpR.data ?? []); setMerchantPays(mpR.data ?? []);
+    setExpenses(exR.data ?? []); setSales(slR.data ?? []);
+    setInvDateMap(Object.fromEntries((slR.data ?? []).map((i: any) => [i.invoice_id, localDateOf(i.created_at)])));
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
 
   const flows: Flow[] = useMemo(() => {
     const out: Flow[] = [];
@@ -65,7 +77,7 @@ function Recoveries() {
         key: `lp-${l.id}`, date: l.entry_date,
         kind: saleDay && saleDay === l.entry_date ? "sale-payment" : "recovery",
         who: l.clients ? `${l.clients.account_no ? `${l.clients.account_no} · ` : ""}${l.clients.name}` : "Customer",
-        detail: `${methodLabel(l.method ?? "cash")}${l.note ? ` · ${l.note}` : ""}`,
+        detail: [methodLabel(l.method ?? "cash"), l.reference, l.note].filter(Boolean).join(" · "),
         amount: Number(l.amount),
       });
     });
@@ -108,15 +120,34 @@ function Recoveries() {
     return map;
   }, [sales, flows]);
 
+  // Day-by-day record, exactly like the expenses book: every movement filed
+  // under the date it happened, newest day first.
   const byDay = useMemo(() => {
+    const keep = (f: Flow) => {
+      if (month && !(f.date ?? "").startsWith(month)) return false;
+      if (show === "recovery") return f.kind === "recovery";
+      if (show === "in") return f.amount > 0;
+      if (show === "out") return f.amount < 0;
+      return true;
+    };
     const map = new Map<string, Flow[]>();
-    flows.forEach((f) => {
+    flows.filter(keep).forEach((f) => {
       const d = f.date ?? "—";
       if (!map.has(d)) map.set(d, []);
       map.get(d)!.push(f);
     });
-    return [...map.entries()].slice(0, 45);
-  }, [flows]);
+    return [...map.entries()].slice(0, 120);
+  }, [flows, show, month]);
+
+  // Totals for whatever range is on screen (a month, or everything).
+  const rangeTotals = useMemo(() => {
+    const inRange = flows.filter((f) => !month || (f.date ?? "").startsWith(month));
+    return {
+      recovered: sumMoney(inRange.filter((f) => f.kind === "recovery").map((f) => f.amount)),
+      count: inRange.filter((f) => f.kind === "recovery").length,
+      days: new Set(inRange.filter((f) => f.kind === "recovery").map((f) => f.date)).size,
+    };
+  }, [flows, month]);
 
   const today = localToday();
   const t = useMemo(() => {
@@ -128,12 +159,12 @@ function Recoveries() {
       cashSales: todaySales.cash,
       creditSales: todaySales.credit,
       // Cash flow
-      recToday: todayFlows.filter((f) => f.kind === "recovery").reduce((a, f) => a + f.amount, 0),
-      salePayToday: todayFlows.filter((f) => f.kind === "sale-payment").reduce((a, f) => a + f.amount, 0),
-      inToday: todayFlows.filter((f) => f.amount > 0).reduce((a, f) => a + f.amount, 0),
-      merToday: Math.abs(todayFlows.filter((f) => f.kind === "merchant-payment").reduce((a, f) => a + f.amount, 0)),
-      expToday: Math.abs(todayFlows.filter((f) => f.kind === "expense").reduce((a, f) => a + f.amount, 0)),
-      netToday: todayFlows.reduce((a, f) => a + f.amount, 0) + 0,
+      recToday: sumMoney(todayFlows.filter((f) => f.kind === "recovery").map((f) => f.amount)),
+      salePayToday: sumMoney(todayFlows.filter((f) => f.kind === "sale-payment").map((f) => f.amount)),
+      inToday: sumMoney(todayFlows.filter((f) => f.amount > 0).map((f) => f.amount)),
+      merToday: Math.abs(sumMoney(todayFlows.filter((f) => f.kind === "merchant-payment").map((f) => f.amount))),
+      expToday: Math.abs(sumMoney(todayFlows.filter((f) => f.kind === "expense").map((f) => f.amount))),
+      netToday: sumMoney(todayFlows.map((f) => f.amount)),
     };
   }, [flows, salesByDay, today]);
 
@@ -164,19 +195,60 @@ function Recoveries() {
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
         <Kpi icon={HandCoins} label="Recoveries (old udhar only)" value={money(t.recToday)} green />
         <Kpi icon={Banknote} label="Today's sale payments" value={money(t.salePayToday)} />
-        <Kpi icon={Wallet} label="Total cash in" value={money(t.inToday)} green />
+        <Kpi icon={Wallet} label="Total amount in" value={money(t.inToday)} green />
         <Kpi icon={Store} label="Merchant payments" value={money(t.merToday)} accent={t.merToday > 0} />
         <Kpi icon={TrendingDown} label="Expenses" value={money(t.expToday)} accent={t.expToday > 0} />
       </div>
 
+      {/* Day-wise record — same idea as the expenses book */}
+      <div className="rounded-2xl bg-card p-3 shadow-sm mb-4 flex flex-wrap items-center gap-2">
+        <div className="flex gap-1 flex-wrap">
+          {([
+            ["all", "Everything"],
+            ["recovery", "Recoveries only"],
+            ["in", "Money in"],
+            ["out", "Money out"],
+          ] as const).map(([v, label]) => (
+            <button key={v} onClick={() => setShow(v)}
+                    className={`text-xs rounded-full px-3 py-1.5 font-semibold transition ${
+                      show === v ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-muted-foreground ml-1">Month</span>
+        <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="h-8 w-40 text-xs" />
+        {month && <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setMonth("")}>Clear month</Button>}
+        <div className="ml-auto flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">
+            Recovered {month ? `in ${month}` : "in total"}:{" "}
+            <b className="text-green-600">{money(rangeTotals.recovered)}</b>
+            {rangeTotals.count > 0 && ` · ${rangeTotals.count} payment${rangeTotals.count > 1 ? "s" : ""} over ${rangeTotals.days} day${rangeTotals.days > 1 ? "s" : ""}`}
+          </span>
+          <Button variant="outline" size="sm" className="h-8" onClick={load} disabled={loading}>
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </Button>
+        </div>
+      </div>
+
+      {loadError && (
+        <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive mb-4">
+          Could not load some records: {loadError}
+        </div>
+      )}
+
       <div className="space-y-4">
-        {byDay.length === 0 && (
-          <div className="rounded-2xl bg-card p-10 text-center text-muted-foreground shadow-sm">No cash movements yet.</div>
+        {byDay.length === 0 && !loading && (
+          <div className="rounded-2xl bg-card p-10 text-center text-muted-foreground shadow-sm">
+            {show === "recovery"
+              ? `No recoveries recorded${month ? " in this month" : " yet"}. A recovery is a payment received against a bill raised on an earlier day.`
+              : `No cash movements${month ? " in this month" : " yet"}.`}
+          </div>
         )}
         {byDay.map(([day, list]) => {
-          const dayIn = list.filter((f) => f.amount > 0).reduce((a, f) => a + f.amount, 0);
-          const dayOut = Math.abs(list.filter((f) => f.amount < 0).reduce((a, f) => a + f.amount, 0));
-          const dayRec = list.filter((f) => f.kind === "recovery").reduce((a, f) => a + f.amount, 0);
+          const dayIn = sumMoney(list.filter((f) => f.amount > 0).map((f) => f.amount));
+          const dayOut = Math.abs(sumMoney(list.filter((f) => f.amount < 0).map((f) => f.amount)));
+          const dayRec = sumMoney(list.filter((f) => f.kind === "recovery").map((f) => f.amount));
           const daySales = salesByDay.get(day);
           return (
             <div key={day} className="rounded-2xl bg-card shadow-sm overflow-hidden">
