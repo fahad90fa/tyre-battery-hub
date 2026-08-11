@@ -4,6 +4,7 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { printArea } from "@/lib/print";
 import { money, shortDate, localToday } from "@/lib/format";
+import { effectivePrice } from "@/lib/pricing";
 import { Letterhead } from "@/components/admin/Letterhead";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { Button } from "@/components/ui/button";
@@ -285,13 +286,13 @@ function QuotationsAdmin() {
                   <div className="flex gap-1.5 items-center">
                     <div className="flex-1 min-w-0">
                       <SearchableSelect
-                        options={products.map((p) => ({ value: p.id, label: p.product_name, hint: money(p.selling_price) }))}
+                        options={products.map((p) => ({ value: p.id, label: p.product_name, hint: money(effectivePrice(p)) }))}
                         value={l.product_id}
                         onValueChange={(v) => {
                           const p = products.find((x) => x.id === v);
                           setLine(i, {
                             product_id: v, product_name: p?.product_name ?? "",
-                            unit_price: Number(p?.selling_price ?? 0),
+                            unit_price: effectivePrice(p),
                           });
                         }}
                         placeholder={l.product_name || "Product"}

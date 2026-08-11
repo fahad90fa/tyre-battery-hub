@@ -46,8 +46,10 @@ function DailyClosing() {
     // Sales come from INVOICES (the one record every sale creates) so the
     // figures can never be blank because a secondary table missed a row.
     const [{ data: inv }, { data: ip }, { data: lp }, { data: mp }, { data: ex }, { data: cl }, { data: hist }] = await Promise.all([
+      // Cancelled (returned) invoices are no longer sales.
       supabase.from("invoices").select("id, invoice_id, customer_name, total_amount, created_at, client_id")
-        .gte("created_at", dayStart.toISOString()).lt("created_at", dayEnd.toISOString()),
+        .gte("created_at", dayStart.toISOString()).lt("created_at", dayEnd.toISOString())
+        .neq("payment_status", "cancelled"),
       supabase.from("invoice_payments").select("*, invoices(invoice_id, customer_name, created_at, client_id)").eq("payment_date", date),
       supabase.from("client_ledger").select("*, clients(name)").eq("entry_type", "payment").eq("entry_date", date),
       supabase.from("merchant_ledger").select("*, merchants(name)").eq("entry_type", "payment").eq("entry_date", date),

@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { printArea } from "@/lib/print";
 import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel } from "@/lib/payments";
+import { matchesQuery } from "@/lib/search";
+import { allocatePaymentToInvoices } from "@/lib/allocate";
 import { InvoiceQuickView } from "@/components/admin/InvoiceQuickView";
 import { PurchaseQuickView } from "@/components/admin/PurchaseQuickView";
 import { Button } from "@/components/ui/button";
@@ -71,7 +73,8 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
       const today = localToday();
       const { data: inv } = await supabase.from("invoices")
         .select("client_id, due_date, payment_status")
-        .neq("payment_status", "paid").not("client_id", "is", null);
+        .neq("payment_status", "paid").neq("payment_status", "cancelled")
+        .not("client_id", "is", null);
       const map: Record<string, number> = {};
       (inv ?? []).forEach((i) => {
         if (i.client_id && i.due_date && i.due_date < today) map[i.client_id] = (map[i.client_id] ?? 0) + 1;
@@ -99,9 +102,20 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
   };
   const edit = (r: any) => { setEditing(r.id); setForm({ ...empty, ...r }); setOpen(true); };
 
-  const filtered = rows.filter((r) => !q ||
-    [r.account_no, r.name, r.phone, r.email, r.cnic, r.address]
-      .filter(Boolean).join(" ").toLowerCase().includes(q.toLowerCase()));
+  // Search matches every typed word in any order; the list is sorted so
+  // open balances come first (smallest on top) and cleared (zero-balance)
+  // accounts sink to the bottom out of the way.
+  const filtered = rows
+    .filter((r) => matchesQuery(
+      [r.account_no, r.name, r.phone, r.email, r.cnic, r.address].filter(Boolean).join(" "), q))
+    .sort((a, b) => {
+      const balA = Number(a.current_balance) || 0;
+      const balB = Number(b.current_balance) || 0;
+      const openA = balA > 0, openB = balB > 0;
+      if (openA !== openB) return openA ? -1 : 1;
+      if (openA) return balA - balB;
+      return (a.name ?? "").localeCompare(b.name ?? "");
+    });
 
   const outstanding = rows.reduce((a, r) => a + Math.max(0, Number(r.current_balance)), 0);
   const withBalance = rows.filter((r) => Number(r.current_balance) > 0).length;
@@ -229,46 +243,12 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
     if (kind === "clients") {
       const { data: inv } = await supabase.from("invoices")
         .select("id, invoice_id, total_amount, due_date, payment_status, created_at")
-        .eq("client_id", party.id).neq("payment_status", "paid")
+        .eq("client_id", party.id).neq("payment_status", "paid").neq("payment_status", "cancelled")
         .order("due_date", { ascending: true, nullsFirst: false });
       setOverdueInvoices(inv ?? []);
     }
   };
   useEffect(() => { load(); }, [party.id]);
-
-  // When a customer pays into their account, spread the amount over their
-  // outstanding invoices (oldest first) so invoice statuses flip to
-  // paid/partial automatically — no manual status changes needed.
-  const allocateToInvoices = async (amount: number, method: string, payDate: string) => {
-    const { data: invs } = await supabase.from("invoices")
-      .select("id, invoice_id, total_amount, payment_status, created_at")
-      .eq("client_id", party.id).neq("payment_status", "paid")
-      .order("created_at");
-    if (!invs?.length) return 0;
-    const ids = invs.map((i) => i.id);
-    const { data: pays } = await supabase.from("invoice_payments").select("invoice_id, amount").in("invoice_id", ids);
-    let remaining = amount;
-    let touched = 0;
-    for (const inv of invs) {
-      if (remaining <= 0) break;
-      const paid = (pays ?? []).filter((x) => x.invoice_id === inv.id).reduce((a, x) => a + Number(x.amount), 0);
-      const bal = Number(inv.total_amount) - paid;
-      if (bal <= 0) {
-        await supabase.from("invoices").update({ payment_status: "paid" }).eq("id", inv.id);
-        continue;
-      }
-      const alloc = Math.min(bal, remaining);
-      const { error: payErr } = await supabase.from("invoice_payments").insert({
-        invoice_id: inv.id, amount: alloc, method, payment_date: payDate,
-        note: "Auto-allocated from account payment",
-      });
-      if (payErr) { toast.error(payErr.message); break; }
-      await supabase.from("invoices").update({ payment_status: alloc >= bal ? "paid" : "partial" }).eq("id", inv.id);
-      remaining -= alloc;
-      touched++;
-    }
-    return touched;
-  };
 
   const add = async () => {
     if (!form.amount || Number(form.amount) <= 0) return toast.error("Amount required");
@@ -283,7 +263,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
     });
     if (error) return toast.error(error.message);
     if (kind === "clients" && isPayment) {
-      const touched = await allocateToInvoices(Number(form.amount), form.method, entryDate);
+      const touched = await allocatePaymentToInvoices(party.id, Number(form.amount), form.method, entryDate);
       if (touched > 0) toast.success(`Payment applied to ${touched} invoice${touched > 1 ? "s" : ""} automatically`);
     }
     setForm(blankEntry(kind));

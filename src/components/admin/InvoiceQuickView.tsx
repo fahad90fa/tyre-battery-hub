@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { printArea } from "@/lib/print";
 import { money, shortDate } from "@/lib/format";
 import { methodLabel } from "@/lib/payments";
+import { toPaisa } from "@/lib/pricing";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Letterhead } from "@/components/admin/Letterhead";
@@ -16,24 +17,33 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
   const [inv, setInv] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
+  const [client, setClient] = useState<any>(null);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    if (!invoiceRef) { setInv(null); setItems([]); setPayments([]); setNotFound(false); return; }
+    if (!invoiceRef) { setInv(null); setItems([]); setPayments([]); setClient(null); setNotFound(false); return; }
     (async () => {
       const { data: invoice } = await supabase.from("invoices").select("*").eq("invoice_id", invoiceRef).maybeSingle();
       if (!invoice) { setNotFound(true); return; }
       setInv(invoice);
-      const [{ data: it }, { data: pays }] = await Promise.all([
+      const [{ data: it }, { data: pays }, clientRes] = await Promise.all([
         supabase.from("invoice_items").select("*").eq("invoice_id", invoice.id),
         supabase.from("invoice_payments").select("*").eq("invoice_id", invoice.id).order("payment_date"),
+        invoice.client_id
+          ? supabase.from("clients").select("id, name, account_no, current_balance").eq("id", invoice.client_id).maybeSingle()
+          : Promise.resolve({ data: null }),
       ]);
-      setItems(it ?? []); setPayments(pays ?? []);
+      setItems(it ?? []); setPayments(pays ?? []); setClient(clientRes.data ?? null);
     })();
   }, [invoiceRef]);
 
   const paid = payments.reduce((a, p) => a + Number(p.amount), 0);
   const balance = inv ? Math.max(0, Number(inv.total_amount) - paid) : 0;
+  const cancelled = inv?.payment_status === "cancelled";
+  // The account's standing before this bill, so the printed invoice shows
+  // the complete position: previous balance + this bill = total outstanding.
+  const accountTotal = client ? Number(client.current_balance) || 0 : 0;
+  const previousBalance = client ? toPaisa(accountTotal - balance) : 0;
 
   return (
     <Dialog open={!!invoiceRef} onOpenChange={(v) => !v && onClose()}>
@@ -47,8 +57,14 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
         {inv && (
           <div className="print-area text-sm space-y-2">
             <Letterhead docTitle="Invoice" docNo={inv.invoice_id} date={inv.created_at} />
+            {cancelled && (
+              <div className="rounded-lg border-2 border-destructive text-destructive font-black text-center py-1.5 uppercase tracking-widest">
+                Cancelled — items returned
+              </div>
+            )}
             <div className="flex justify-between text-muted-foreground">
-              <span>Customer</span><span className="text-foreground">{inv.customer_name}</span>
+              <span>Customer</span>
+              <span className="text-foreground">{inv.customer_name}{client?.account_no ? ` (${client.account_no})` : ""}</span>
             </div>
             <div className="flex justify-between text-muted-foreground">
               <span>Purchase date</span><span className="text-foreground">{shortDate(inv.created_at)}</span>
@@ -79,7 +95,7 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
               </tbody>
             </table>
             <div className="flex justify-between pt-3 border-t font-bold">
-              <span>Total</span><span>{money(inv.total_amount)}</span>
+              <span>This invoice</span><span>{money(inv.total_amount)}</span>
             </div>
             <div className="flex justify-between text-green-600">
               <span>Paid</span><span>{money(paid)}</span>
@@ -87,6 +103,21 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
             <div className={`flex justify-between font-semibold ${balance > 0 ? "text-orange-500" : "text-muted-foreground"}`}>
               <span>Balance due</span><span>{balance > 0 ? money(balance) : "—"}</span>
             </div>
+            {client && (
+              <div className="pt-2 border-t space-y-1">
+                <div className="text-xs uppercase text-muted-foreground">Account summary — {client.name}</div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Previous balance (other bills)</span><span className="text-foreground">{money(previousBalance)}</span>
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>This invoice balance</span><span className="text-foreground">{money(balance)}</span>
+                </div>
+                <div className="flex justify-between font-bold text-base border-t pt-1">
+                  <span>Total outstanding</span>
+                  <span className={accountTotal > 0 ? "text-orange-500" : "text-green-600"}>{money(accountTotal)}</span>
+                </div>
+              </div>
+            )}
             {payments.length > 0 && (
               <div className="pt-2 border-t">
                 <div className="text-xs uppercase text-muted-foreground mb-1">Payment history</div>

@@ -5,14 +5,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { printArea } from "@/lib/print";
 import { money, shortDate, localToday, localDateOf } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, paymentStatus } from "@/lib/payments";
+import { sumMoney, toPaisa } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Printer, EyeOff } from "lucide-react";
+import { Printer, EyeOff, Undo2 } from "lucide-react";
 import { Letterhead } from "@/components/admin/Letterhead";
 
 export const Route = createFileRoute("/_authenticated/admin/invoices")({
@@ -24,9 +26,14 @@ function InvoicesAdmin() {
   const [payments, setPayments] = useState<Record<string, any[]>>({});
   const [open, setOpen] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
+  const [client, setClient] = useState<any>(null);
   const [tab, setTab] = useState("all");
   const [dateFilter, setDateFilter] = useState("");
   const [payForm, setPayForm] = useState({ method: "cash", amount: 0 });
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [returnQty, setReturnQty] = useState<Record<string, number>>({});
+  const [refundCash, setRefundCash] = useState(true);
+  const [processing, setProcessing] = useState(false);
 
   const load = async () => {
     const [{ data: inv }, { data: pays }] = await Promise.all([
@@ -43,19 +50,20 @@ function InvoicesAdmin() {
   const paidOf = (inv: any) => (payments[inv.id] ?? []).reduce((a, p) => a + Number(p.amount), 0);
   const balanceOf = (inv: any) => Math.max(0, Number(inv.total_amount) - paidOf(inv));
   const today = localToday();
-  const isOverdue = (inv: any) => balanceOf(inv) > 0 && inv.due_date && inv.due_date < today;
+  const isCancelled = (inv: any) => inv.payment_status === "cancelled";
+  const isOverdue = (inv: any) => !isCancelled(inv) && balanceOf(inv) > 0 && inv.due_date && inv.due_date < today;
 
   const filtered = useMemo(() => {
     let list = rows;
     if (dateFilter) list = list.filter((r) => localDateOf(r.created_at) === dateFilter);
-    if (tab === "outstanding") return list.filter((r) => balanceOf(r) > 0);
+    if (tab === "outstanding") return list.filter((r) => !isCancelled(r) && balanceOf(r) > 0);
     if (tab === "overdue") return list.filter(isOverdue);
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, payments, tab, dateFilter]);
 
   const totals = useMemo(() => ({
-    outstanding: rows.reduce((a, r) => a + balanceOf(r), 0),
+    outstanding: rows.reduce((a, r) => a + (isCancelled(r) ? 0 : balanceOf(r)), 0),
     overdueCount: rows.filter(isOverdue).length,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [rows, payments]);
@@ -64,10 +72,16 @@ function InvoicesAdmin() {
   const view = async (inv: any) => {
     setOpen(inv);
     setItems([]);
+    setClient(null);
     setPayForm({ method: "cash", amount: Math.max(0, Number(inv.total_amount) - paidOf(inv)) });
     const req = ++viewReq.current;
-    const { data } = await supabase.from("invoice_items").select("*").eq("invoice_id", inv.id);
-    if (req === viewReq.current) setItems(data ?? []);
+    const [{ data }, clientRes] = await Promise.all([
+      supabase.from("invoice_items").select("*").eq("invoice_id", inv.id),
+      inv.client_id
+        ? supabase.from("clients").select("id, name, account_no, current_balance").eq("id", inv.client_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+    if (req === viewReq.current) { setItems(data ?? []); setClient(clientRes.data ?? null); }
   };
 
   const addPayment = async () => {
@@ -98,11 +112,139 @@ function InvoicesAdmin() {
     setPayForm({ method: "cash", amount: 0 });
   };
 
+  // ---- Returns / cancellation -------------------------------------------
+  // Returning items puts them back in stock, credits the customer's account,
+  // shrinks the invoice, and (optionally) books the cash refund — so stock,
+  // khaata and daily cash all stay truthful. Returning everything cancels
+  // the invoice.
+  const openReturn = () => {
+    setReturnQty(Object.fromEntries(items.map((it) => [it.id, it.quantity])));
+    setRefundCash(true);
+    setReturnOpen(true);
+  };
+
+  const retLines = items
+    .map((it) => ({ it, ret: Math.min(Math.max(0, Math.floor(Number(returnQty[it.id]) || 0)), it.quantity) }))
+    .filter((l) => l.ret > 0);
+  // Value returned per line, prorated from what was actually CHARGED for the
+  // line — unit_price can be a list price that differs from a negotiated
+  // total, and valuing returns off it would corrupt the account.
+  const lineReturnValue = (it: any, ret: number) =>
+    ret >= it.quantity ? toPaisa(it.total_price) : toPaisa((Number(it.total_price) * ret) / it.quantity);
+  const returnValue = sumMoney(retLines.map((l) => lineReturnValue(l.it, l.ret)));
+  const fullReturn = items.length > 0 &&
+    items.every((it) => (retLines.find((l) => l.it.id === it.id)?.ret ?? 0) >= it.quantity);
+  // Everything returned always cancels to zero, even on old invoices whose
+  // item lines don't add up exactly to the invoice total.
+  const newTotal = fullReturn ? 0 : Math.max(0, toPaisa(Number(open?.total_amount ?? 0) - returnValue));
+  const paidSoFar = open ? paidOf(open) : 0;
+  const refundDue = Math.max(0, toPaisa(paidSoFar - newTotal));
+  // A walk-in has no account to carry a credit — their refund is always cash.
+  const canLeaveOnAccount = !!open?.client_id;
+  const willRefundCash = refundDue > 0 && (canLeaveOnAccount ? refundCash : true);
+
+  const processReturn = async () => {
+    if (!open || retLines.length === 0) return toast.error("Enter a quantity to return");
+    setProcessing(true);
+    try {
+      // Credit the account by exactly what the invoice shrank, so the khaata
+      // always mirrors the invoice — even when a clamp rounded the total.
+      const ledgerCredit = toPaisa(Number(open.total_amount) - newTotal);
+
+      // 1. The invoice first — the money side must never lag behind. If this
+      //    fails, nothing else has happened yet and it's safe to retry.
+      const newStatus = newTotal <= 0 ? "cancelled" : paymentStatus(newTotal, paidSoFar);
+      const { error: invErr } = await supabase.from("invoices")
+        .update({ total_amount: newTotal, payment_status: newStatus }).eq("id", open.id);
+      if (invErr) return toast.error(`Nothing was changed — could not update the invoice: ${invErr.message}`);
+
+      // 2. Account customers: credit the khaata.
+      if (open.client_id && ledgerCredit > 0) {
+        const { error: ledErr } = await supabase.from("client_ledger").insert({
+          client_id: open.client_id, entry_type: "credit", amount: ledgerCredit,
+          reference: open.invoice_id,
+          note: `Return: ${retLines.map((l) => `${l.it.product_name} × ${l.ret}`).join("; ")}`,
+          entry_date: localToday(),
+        });
+        if (ledErr) toast.error(`Invoice updated but the account credit FAILED — add a credit of ${money(ledgerCredit)} (ref ${open.invoice_id}) to the account manually: ${ledErr.message}`);
+      }
+
+      // 3. Shrink or remove the invoice lines.
+      for (const l of retLines) {
+        const left = l.it.quantity - l.ret;
+        const { error: itemErr } = left <= 0
+          ? await supabase.from("invoice_items").delete().eq("id", l.it.id)
+          : await supabase.from("invoice_items")
+              .update({ quantity: left, total_price: toPaisa(Number(l.it.total_price) - lineReturnValue(l.it, l.ret)) })
+              .eq("id", l.it.id);
+        if (itemErr) toast.error(`Could not update the invoice line for ${l.it.product_name}: ${itemErr.message}`);
+      }
+
+      // 4. Put the returned quantities back into stock (fresh counts, so a
+      //    sale made meanwhile isn't overwritten).
+      for (const l of retLines) {
+        if (!l.it.product_id) continue;
+        const { data: prod, error: readErr } = await supabase.from("products")
+          .select("quantity_in_stock, product_name").eq("id", l.it.product_id).maybeSingle();
+        const { error: stockErr } = prod
+          ? await supabase.from("products")
+              .update({ quantity_in_stock: (Number(prod.quantity_in_stock) || 0) + l.ret })
+              .eq("id", l.it.product_id)
+          : { error: readErr };
+        if (stockErr) toast.error(`Restock FAILED for ${l.it.product_name} — add ${l.ret} back to its stock manually: ${stockErr.message}`);
+      }
+
+      // 5. Sales history: negative rows dated on the sale day, so reports
+      //    and the dashboard net the return out of that day's figures.
+      const saleDay = localDateOf(open.created_at) || localToday();
+      const { error: cpErr } = await supabase.from("customer_purchases").insert(retLines.map((l) => ({
+        customer_name: open.customer_name, product_id: l.it.product_id,
+        quantity_purchased: -l.ret, total_price: -lineReturnValue(l.it, l.ret),
+        cost_price: l.it.cost_price, payment_method: "return", payment_status: "paid",
+        purchase_date: saleDay,
+      })));
+      if (cpErr) toast.error(`Return saved, but the sales history row failed: ${cpErr.message}`);
+
+      // 6. If they had paid more than what's left, hand the cash back and
+      //    book it, so the daily closing shows the money going out.
+      if (willRefundCash) {
+        const { error: expErr } = await supabase.from("expenses").insert({
+          expense_type: "Customer refund", amount: refundDue,
+          notes: `Refund for return on ${open.invoice_id} (${open.customer_name})`,
+          date_of_expense: localToday(),
+        });
+        if (expErr) toast.error(`Refund of ${money(refundDue)} was NOT booked — record it as an expense manually: ${expErr.message}`);
+        if (open.client_id) {
+          const { error: dbErr } = await supabase.from("client_ledger").insert({
+            client_id: open.client_id, entry_type: "debit", amount: refundDue,
+            reference: open.invoice_id, note: "Cash refunded for returned items",
+            entry_date: localToday(),
+          });
+          if (dbErr) toast.error(`Account debit for the ${money(refundDue)} refund failed — add it manually: ${dbErr.message}`);
+        }
+      }
+
+      toast.success(newTotal <= 0
+        ? `Invoice ${open.invoice_id} cancelled — stock restored${willRefundCash ? `, ${money(refundDue)} refunded` : ""}`
+        : `Return recorded — invoice now ${money(newTotal)}, stock restored`);
+      setReturnOpen(false);
+      await load();
+      const { data: fresh } = await supabase.from("invoices").select("*").eq("id", open.id).maybeSingle();
+      if (fresh) view(fresh); else setOpen(null);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const cost = items.reduce((a, it) => a + Number(it.cost_price ?? 0) * it.quantity, 0);
   const hasCost = items.some((it) => it.cost_price != null);
   const profit = Number(open?.total_amount ?? 0) - cost;
   const openPaid = open ? paidOf(open) : 0;
   const openBalance = open ? balanceOf(open) : 0;
+  // The account's standing before this bill; adding this bill's balance on
+  // top gives the total the customer owes right now.
+  const accountTotal = client ? Number(client.current_balance) || 0 : 0;
+  const previousBalance = client ? toPaisa(accountTotal - openBalance) : 0;
 
   return (
     <AdminShell title="Invoices">
@@ -134,8 +276,9 @@ function InvoicesAdmin() {
             {filtered.map((r) => {
               const bal = balanceOf(r);
               const overdue = isOverdue(r);
+              const cancelled = isCancelled(r);
               return (
-                <tr key={r.id} className="border-t hover:bg-muted/50 cursor-pointer" onClick={() => view(r)}>
+                <tr key={r.id} className={`border-t hover:bg-muted/50 cursor-pointer ${cancelled ? "opacity-60" : ""}`} onClick={() => view(r)}>
                   <td className="p-3 font-mono">{r.invoice_id}</td>
                   <td className="p-3">{shortDate(r.created_at)}</td>
                   <td className="p-3">{r.customer_name}</td>
@@ -144,10 +287,10 @@ function InvoicesAdmin() {
                   <td className={`p-3 font-semibold ${bal > 0 ? "text-orange-500" : "text-muted-foreground"}`}>{bal > 0 ? money(bal) : "—"}</td>
                   <td className="p-3 text-muted-foreground">{r.payment_method}</td>
                   <td className="p-3">
-                    <span className={r.payment_status === "paid" ? "text-green-600" : overdue ? "text-destructive font-semibold" : "text-orange-500"}>
-                      {overdue ? "overdue" : r.payment_status}
+                    <span className={cancelled ? "text-destructive font-semibold" : r.payment_status === "paid" ? "text-green-600" : overdue ? "text-destructive font-semibold" : "text-orange-500"}>
+                      {cancelled ? "cancelled" : overdue ? "overdue" : r.payment_status}
                     </span>
-                    {r.due_date && bal > 0 && <div className="text-[10px] text-muted-foreground">due {shortDate(r.due_date)}</div>}
+                    {r.due_date && bal > 0 && !cancelled && <div className="text-[10px] text-muted-foreground">due {shortDate(r.due_date)}</div>}
                   </td>
                   <td className="p-3"><Button variant="ghost" size="sm">View</Button></td>
                 </tr>
@@ -165,8 +308,14 @@ function InvoicesAdmin() {
           {/* Customer-facing section — this is what gets printed, on letterhead */}
           <div className="print-area text-sm space-y-2">
             <Letterhead docTitle="Invoice" docNo={open?.invoice_id ?? ""} date={open?.created_at} />
+            {open && isCancelled(open) && (
+              <div className="rounded-lg border-2 border-destructive text-destructive font-black text-center py-1.5 uppercase tracking-widest">
+                Cancelled — items returned
+              </div>
+            )}
             <div className="flex justify-between text-muted-foreground">
-              <span>Customer</span><span>{open?.customer_name}</span>
+              <span>Customer</span>
+              <span>{open?.customer_name}{client?.account_no ? ` (${client.account_no})` : ""}</span>
             </div>
             <div className="flex justify-between text-muted-foreground">
               <span>Date</span><span>{shortDate(open?.created_at)}</span>
@@ -178,7 +327,7 @@ function InvoicesAdmin() {
               ))}</tbody>
             </table>
             <div className="flex justify-between pt-3 border-t font-bold text-base">
-              <span>Total</span><span>{money(open?.total_amount)}</span>
+              <span>This invoice</span><span>{money(open?.total_amount)}</span>
             </div>
             <div className="flex justify-between text-green-600">
               <span>Paid</span><span>{money(openPaid)}</span>
@@ -187,6 +336,23 @@ function InvoicesAdmin() {
               <div className="flex justify-between font-semibold text-orange-500">
                 <span>Balance due{open?.due_date ? ` (by ${shortDate(open.due_date)})` : ""}</span>
                 <span>{money(openBalance)}</span>
+              </div>
+            )}
+            {client && (
+              // Full account position, so the customer can read everything
+              // they owe straight off the invoice.
+              <div className="pt-2 border-t space-y-1">
+                <div className="text-xs uppercase text-muted-foreground">Account summary — {client.name}</div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Previous balance (other bills)</span><span className="text-foreground">{money(previousBalance)}</span>
+                </div>
+                <div className="flex justify-between text-muted-foreground">
+                  <span>This invoice balance</span><span className="text-foreground">{money(openBalance)}</span>
+                </div>
+                <div className="flex justify-between font-bold text-base border-t pt-1">
+                  <span>Total outstanding</span>
+                  <span className={accountTotal > 0 ? "text-orange-500" : "text-green-600"}>{money(accountTotal)}</span>
+                </div>
               </div>
             )}
             {(payments[open?.id] ?? []).length > 0 && (
@@ -222,7 +388,7 @@ function InvoicesAdmin() {
             )}
           </div>
 
-          {openBalance > 0 && (
+          {open && !isCancelled(open) && openBalance > 0 && (
             <div className="print:hidden rounded-xl border p-3 space-y-2">
               <Label className="text-xs uppercase text-muted-foreground tracking-wider">Record payment (recovery)</Label>
               <div className="flex gap-2">
@@ -237,8 +403,73 @@ function InvoicesAdmin() {
             </div>
           )}
 
-          <Button className="w-full mt-2 print:hidden" onClick={() => printArea()}>
-            <Printer className="h-4 w-4 mr-2" /> Print
+          <div className="flex gap-2 mt-2 print:hidden">
+            {open && !isCancelled(open) && items.length > 0 && (
+              <Button variant="outline" className="flex-1 text-destructive hover:text-destructive" onClick={openReturn}>
+                <Undo2 className="h-4 w-4 mr-2" /> Return / cancel
+              </Button>
+            )}
+            <Button className="flex-1" onClick={() => printArea()}>
+              <Printer className="h-4 w-4 mr-2" /> Print
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Return / cancel dialog */}
+      <Dialog open={returnOpen} onOpenChange={(v) => !v && setReturnOpen(false)}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Return items — {open?.invoice_id}</DialogTitle></DialogHeader>
+          <div className="text-xs text-muted-foreground">
+            Returned quantities go straight back into stock, the customer's account is
+            credited, and returning everything cancels the invoice. Wrong bill? Leave
+            all quantities as they are and confirm — that cancels it completely.
+          </div>
+          <div className="space-y-2">
+            {items.map((it) => (
+              <div key={it.id} className="rounded-xl border p-3 flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">{it.product_name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    Sold {it.quantity} for {money(it.total_price)}
+                  </div>
+                </div>
+                <div className="w-24 space-y-1">
+                  <Label className="text-[10px] text-muted-foreground uppercase">Return qty</Label>
+                  <Input type="number" min={0} max={it.quantity} value={returnQty[it.id] ?? 0}
+                         onChange={(e) => setReturnQty((m) => ({ ...m, [it.id]: Number(e.target.value) }))} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-xl bg-muted/40 p-3 text-sm space-y-1">
+            <div className="flex justify-between"><span className="text-muted-foreground">Return value</span><b>{money(returnValue)}</b></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Invoice after return</span><b>{money(newTotal)}</b></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Already paid</span><b className="text-green-600">{money(paidSoFar)}</b></div>
+            {refundDue > 0 && (
+              <div className="flex justify-between font-semibold text-orange-500">
+                <span>Refund due to customer</span><span>{money(refundDue)}</span>
+              </div>
+            )}
+          </div>
+          {refundDue > 0 && (canLeaveOnAccount ? (
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox checked={refundCash} onCheckedChange={(v) => setRefundCash(v === true)} />
+              <span>
+                Refund <b>{money(refundDue)}</b> in cash now (recorded as money out today).
+                Untick to leave it as credit on the account.
+              </span>
+            </label>
+          ) : (
+            <div className="text-sm">
+              Refund <b>{money(refundDue)}</b> in cash to the customer — it will be recorded as money out today.
+            </div>
+          ))}
+          <Button className="w-full" variant={newTotal <= 0 ? "destructive" : "default"}
+                  onClick={processReturn} disabled={processing || retLines.length === 0}>
+            {processing ? "Processing..."
+              : newTotal <= 0 ? `Cancel invoice & restock ${retLines.reduce((a, l) => a + l.ret, 0)} item(s)`
+              : `Return ${retLines.reduce((a, l) => a + l.ret, 0)} item(s) — ${money(returnValue)}`}
           </Button>
         </DialogContent>
       </Dialog>

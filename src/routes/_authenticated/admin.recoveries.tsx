@@ -3,10 +3,15 @@ import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate, localToday, localDateOf } from "@/lib/format";
-import { methodLabel } from "@/lib/payments";
+import { PAYMENT_METHODS, methodLabel } from "@/lib/payments";
 import { sumMoney } from "@/lib/pricing";
+import { allocatePaymentToInvoices } from "@/lib/allocate";
+import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
 import { HandCoins, Store, TrendingDown, TrendingUp, Wallet, CalendarDays, Banknote, CreditCard, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/admin/recoveries")({
@@ -22,36 +27,74 @@ type Flow = {
   amount: number; // positive = in, negative = out
 };
 
+const blankReceive = () => ({ client_id: "", amount: "", method: "cash", date: localToday() });
+
 function Recoveries() {
   const [invPays, setInvPays] = useState<any[]>([]);
   const [ledgerPays, setLedgerPays] = useState<any[]>([]);
   const [merchantPays, setMerchantPays] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
+  const [clients, setClients] = useState<any[]>([]);
   const [invDateMap, setInvDateMap] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
   const [show, setShow] = useState<"all" | "recovery" | "in" | "out">("all");
   const [month, setMonth] = useState("");            // "" = every month
+  const [receive, setReceive] = useState(blankReceive);
+  const [savingReceive, setSavingReceive] = useState(false);
 
   const load = async () => {
     setLoading(true);
-    const [ipR, lpR, mpR, exR, slR] = await Promise.all([
+    const [ipR, lpR, mpR, exR, slR, clR] = await Promise.all([
       supabase.from("invoice_payments").select("*, invoices(invoice_id, customer_name, created_at, client_id)").order("payment_date", { ascending: false }),
       supabase.from("client_ledger").select("*, clients(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
       supabase.from("merchant_ledger").select("*, merchants(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
       supabase.from("expenses").select("*").order("date_of_expense", { ascending: false }),
-      supabase.from("invoices").select("id, invoice_id, customer_name, total_amount, created_at, client_id").order("created_at", { ascending: false }),
+      supabase.from("invoices").select("id, invoice_id, customer_name, total_amount, created_at, client_id, payment_status").order("created_at", { ascending: false }),
+      supabase.from("clients").select("id, name, account_no, current_balance").order("name"),
     ]);
     // Never show an empty page when a query actually failed.
     setLoadError([ipR.error, lpR.error, mpR.error, exR.error, slR.error]
       .filter(Boolean).map((e) => e!.message).join(" · "));
     setInvPays(ipR.data ?? []); setLedgerPays(lpR.data ?? []); setMerchantPays(mpR.data ?? []);
-    setExpenses(exR.data ?? []); setSales(slR.data ?? []);
+    setExpenses(exR.data ?? []);
+    setSales((slR.data ?? []).filter((i: any) => i.payment_status !== "cancelled"));
+    setClients(clR.data ?? []);
     setInvDateMap(Object.fromEntries((slR.data ?? []).map((i: any) => [i.invoice_id, localDateOf(i.created_at)])));
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
+
+  const receiveClient = clients.find((c) => c.id === receive.client_id);
+
+  // Record a khaata payment straight from this page: writes the customer's
+  // ledger (their balance updates via the DB trigger) and spreads the amount
+  // over their outstanding invoices, oldest first.
+  const receivePayment = async () => {
+    if (!receive.client_id) return toast.error("Select the customer account");
+    const amount = Number(receive.amount);
+    if (!(amount > 0)) return toast.error("Enter the amount received");
+    const entryDate = receive.date || localToday();
+    setSavingReceive(true);
+    try {
+      const { error } = await supabase.from("client_ledger").insert({
+        client_id: receive.client_id, entry_type: "payment", amount,
+        method: receive.method, note: `Recovery (${methodLabel(receive.method)})`,
+        entry_date: entryDate,
+      });
+      if (error) return toast.error(error.message);
+      const touched = await allocatePaymentToInvoices(receive.client_id, amount, receive.method, entryDate);
+      toast.success(
+        `${money(amount)} received from ${receiveClient?.name ?? "customer"}` +
+        (touched > 0 ? ` — applied to ${touched} invoice${touched > 1 ? "s" : ""}` : ""),
+      );
+      setReceive(blankReceive());
+      load();
+    } finally {
+      setSavingReceive(false);
+    }
+  };
 
   const flows: Flow[] = useMemo(() => {
     const out: Flow[] = [];
@@ -198,6 +241,56 @@ function Recoveries() {
         <Kpi icon={Wallet} label="Total amount in" value={money(t.inToday)} green />
         <Kpi icon={Store} label="Merchant payments" value={money(t.merToday)} accent={t.merToday > 0} />
         <Kpi icon={TrendingDown} label="Expenses" value={money(t.expToday)} accent={t.expToday > 0} />
+      </div>
+
+      {/* Receive a payment against a customer's credit (udhaar) account */}
+      <div className="rounded-2xl bg-card p-4 shadow-sm mb-4">
+        <div className="font-semibold text-sm mb-3 flex items-center gap-2">
+          <HandCoins className="h-4 w-4 text-gold" /> Receive payment from a customer account
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+          <div className="space-y-1.5 lg:col-span-2">
+            <Label>Customer account</Label>
+            <SearchableSelect
+              options={clients.map((c) => ({
+                value: c.id, label: `${c.account_no ? `${c.account_no} · ` : ""}${c.name}`,
+                hint: Number(c.current_balance) > 0 ? `owes ${money(c.current_balance)}` : "clear",
+              }))}
+              value={receive.client_id}
+              onValueChange={(v) => setReceive((f) => ({ ...f, client_id: v }))}
+              placeholder="Select account"
+              searchPlaceholder="Search by ID, name..."
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Amount received (Rs)</Label>
+            <Input type="number" step="any" placeholder="0" value={receive.amount}
+                   onChange={(e) => setReceive((f) => ({ ...f, amount: e.target.value }))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Paid by</Label>
+            <Select value={receive.method} onValueChange={(v) => setReceive((f) => ({ ...f, method: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{PAYMENT_METHODS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Date</Label>
+            <Input type="date" value={receive.date} max={localToday()}
+                   onChange={(e) => e.target.value && setReceive((f) => ({ ...f, date: e.target.value }))} />
+          </div>
+        </div>
+        <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-xs text-muted-foreground">
+            {receiveClient
+              ? <>Outstanding balance: <b className={Number(receiveClient.current_balance) > 0 ? "text-orange-500" : "text-green-600"}>{money(receiveClient.current_balance)}</b>
+                 {Number(receive.amount) > 0 && <> · after this payment: <b>{money(Number(receiveClient.current_balance) - Number(receive.amount))}</b></>}</>
+              : "The payment updates the account balance and lands in the day-wise record below."}
+          </div>
+          <Button onClick={receivePayment} disabled={savingReceive}>
+            {savingReceive ? "Saving..." : `Receive ${Number(receive.amount) > 0 ? money(Number(receive.amount)) : "payment"}`}
+          </Button>
+        </div>
       </div>
 
       {/* Day-wise record — same idea as the expenses book */}

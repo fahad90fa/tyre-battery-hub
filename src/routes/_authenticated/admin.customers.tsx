@@ -4,6 +4,7 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
+import { effectivePrice, toPaisa } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -98,7 +99,9 @@ function CustomersAdmin() {
         await supabase.from("invoice_items").insert({
           invoice_id: inv.id, product_id: form.product_id, product_name: prod?.product_name ?? "",
           quantity: qty,
-          unit_price: prod && Number(prod.selling_price) > 0 ? prod.selling_price : (qty > 0 ? total / qty : total),
+          // The price actually charged (the typed total may be negotiated),
+          // so unit price × qty always agrees with the line and invoice total.
+          unit_price: qty > 0 ? toPaisa(total / qty) : total,
           total_price: total, cost_price: prod?.purchase_price ?? null,
         });
         if (activeLines.length > 0) {
@@ -168,12 +171,12 @@ function CustomersAdmin() {
             <SearchableSelect
               options={products.map((p) => ({
                 value: p.id, label: p.product_name,
-                hint: `${money(p.selling_price)} · ${p.quantity_in_stock} in stock`,
+                hint: `${money(effectivePrice(p))} · ${p.quantity_in_stock} in stock`,
               }))}
               value={form.product_id}
               onValueChange={(v) => {
                 const p = products.find((x) => x.id === v);
-                setForm({ ...form, product_id: v, total_price: p && Number(p.selling_price) > 0 ? p.selling_price * form.quantity_purchased : 0 });
+                setForm({ ...form, product_id: v, total_price: p ? effectivePrice(p) * form.quantity_purchased : 0 });
               }}
               placeholder="Select product"
               searchPlaceholder="Search or type new product name..."
@@ -195,7 +198,7 @@ function CustomersAdmin() {
             <div className="space-y-1.5"><Label>Qty</Label><Input type="number" value={form.quantity_purchased} onChange={(e) => {
               const qty = Number(e.target.value);
               const p = products.find((x) => x.id === form.product_id);
-              setForm({ ...form, quantity_purchased: qty, total_price: p && Number(p.selling_price) > 0 ? p.selling_price * qty : form.total_price });
+              setForm({ ...form, quantity_purchased: qty, total_price: p && effectivePrice(p) > 0 ? effectivePrice(p) * qty : form.total_price });
             }} /></div>
           </div>
           <div className="space-y-1.5"><Label>Total (Rs)</Label><Input type="number" className="font-semibold" value={form.total_price} onChange={(e) => setForm({ ...form, total_price: Number(e.target.value) })} /></div>

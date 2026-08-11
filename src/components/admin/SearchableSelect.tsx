@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/command";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { matchesQuery } from "@/lib/search";
 
 export type SearchableOption = { value: string; label: string; hint?: string };
 
@@ -52,7 +53,7 @@ export function SearchableSelect({
       </PopoverTrigger>
       <PopoverContent className="p-0 w-[var(--radix-popover-trigger-width)]" align="start">
         <Command
-          filter={(itemValue, search) => (itemValue.toLowerCase().includes(search.toLowerCase()) ? 1 : 0)}
+          filter={(itemValue, search) => (matchesQuery(itemValue, search) ? 1 : 0)}
         >
           <CommandInput placeholder={searchPlaceholder} value={query} onValueChange={setQuery} />
           <CommandList className="max-h-60">
