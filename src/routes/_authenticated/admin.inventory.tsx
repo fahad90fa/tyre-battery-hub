@@ -89,12 +89,11 @@ function Inventory() {
     return true;
   }), [movements, tab, productFilter, q]);
 
-  // The stock list to print: every product (or those matching the search),
-  // with quantity and prices — a physical copy of what's on the shelf.
-  const stockList = useMemo(
-    () => products.filter((p) => !q || matchesQuery(p.product_name, q)),
-    [products, q],
-  );
+  // The stock list to print: the COMPLETE product list with quantity and
+  // prices — a physical copy of what's on the shelf. (The search box here
+  // also matches parties/refs, so it must not filter the printout; the POS
+  // page prints a search-filtered list.)
+  const stockList = products;
   const stockListUnits = stockList.reduce((a, p) => a + (Number(p.quantity_in_stock) || 0), 0);
   const stockListValue = stockList.reduce((a, p) => a + Number(p.purchase_price ?? 0) * (Number(p.quantity_in_stock) || 0), 0);
 
@@ -139,7 +138,7 @@ function Inventory() {
           <Input placeholder="Search product, party, ref..." value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
         </div>
         <Button variant="outline" onClick={() => setStockPrint(true)}
-                title="Print the current stock list (uses the search box as a filter)">
+                title="Print the complete stock list — every product with its quantity and prices">
           <Printer className="h-4 w-4 mr-2" /> Print stock list
         </Button>
       </div>
@@ -200,8 +199,7 @@ function Inventory() {
               <div className="text-lg font-black">MT&B HOUSE — Stock List</div>
               <div className="text-sm">
                 {shortDate(localToday())}
-                {q.trim() ? ` · search: “${q.trim()}”` : " · all products"}
-                {` · ${stockList.length} product${stockList.length === 1 ? "" : "s"} · ${stockListUnits} unit${stockListUnits === 1 ? "" : "s"}`}
+                {` · all products · ${stockList.length} product${stockList.length === 1 ? "" : "s"} · ${stockListUnits} unit${stockListUnits === 1 ? "" : "s"}`}
               </div>
             </div>
             <table className="w-full text-sm">

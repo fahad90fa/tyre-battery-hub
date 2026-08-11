@@ -4,7 +4,7 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
-import { effectivePrice } from "@/lib/pricing";
+import { effectivePrice, toPaisa } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -99,7 +99,9 @@ function CustomersAdmin() {
         await supabase.from("invoice_items").insert({
           invoice_id: inv.id, product_id: form.product_id, product_name: prod?.product_name ?? "",
           quantity: qty,
-          unit_price: prod && effectivePrice(prod) > 0 ? effectivePrice(prod) : (qty > 0 ? total / qty : total),
+          // The price actually charged (the typed total may be negotiated),
+          // so unit price × qty always agrees with the line and invoice total.
+          unit_price: qty > 0 ? toPaisa(total / qty) : total,
           total_price: total, cost_price: prod?.purchase_price ?? null,
         });
         if (activeLines.length > 0) {

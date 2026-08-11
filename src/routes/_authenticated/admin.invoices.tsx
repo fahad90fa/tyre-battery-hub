@@ -126,85 +126,106 @@ function InvoicesAdmin() {
   const retLines = items
     .map((it) => ({ it, ret: Math.min(Math.max(0, Math.floor(Number(returnQty[it.id]) || 0)), it.quantity) }))
     .filter((l) => l.ret > 0);
-  const returnValue = sumMoney(retLines.map((l) => l.ret * Number(l.it.unit_price)));
-  const newTotal = Math.max(0, toPaisa(Number(open?.total_amount ?? 0) - returnValue));
+  // Value returned per line, prorated from what was actually CHARGED for the
+  // line — unit_price can be a list price that differs from a negotiated
+  // total, and valuing returns off it would corrupt the account.
+  const lineReturnValue = (it: any, ret: number) =>
+    ret >= it.quantity ? toPaisa(it.total_price) : toPaisa((Number(it.total_price) * ret) / it.quantity);
+  const returnValue = sumMoney(retLines.map((l) => lineReturnValue(l.it, l.ret)));
+  const fullReturn = items.length > 0 &&
+    items.every((it) => (retLines.find((l) => l.it.id === it.id)?.ret ?? 0) >= it.quantity);
+  // Everything returned always cancels to zero, even on old invoices whose
+  // item lines don't add up exactly to the invoice total.
+  const newTotal = fullReturn ? 0 : Math.max(0, toPaisa(Number(open?.total_amount ?? 0) - returnValue));
   const paidSoFar = open ? paidOf(open) : 0;
   const refundDue = Math.max(0, toPaisa(paidSoFar - newTotal));
+  // A walk-in has no account to carry a credit — their refund is always cash.
+  const canLeaveOnAccount = !!open?.client_id;
+  const willRefundCash = refundDue > 0 && (canLeaveOnAccount ? refundCash : true);
 
   const processReturn = async () => {
     if (!open || retLines.length === 0) return toast.error("Enter a quantity to return");
     setProcessing(true);
     try {
-      // 1. Put the returned quantities back into stock (fresh counts, so a
-      //    sale made meanwhile isn't overwritten).
-      for (const l of retLines) {
-        if (!l.it.product_id) continue;
-        const { data: prod } = await supabase.from("products")
-          .select("quantity_in_stock").eq("id", l.it.product_id).maybeSingle();
-        if (prod) {
-          await supabase.from("products")
-            .update({ quantity_in_stock: (Number(prod.quantity_in_stock) || 0) + l.ret })
-            .eq("id", l.it.product_id);
-        }
-      }
+      // Credit the account by exactly what the invoice shrank, so the khaata
+      // always mirrors the invoice — even when a clamp rounded the total.
+      const ledgerCredit = toPaisa(Number(open.total_amount) - newTotal);
 
-      // 2. Shrink or remove the invoice lines.
-      for (const l of retLines) {
-        const left = l.it.quantity - l.ret;
-        if (left <= 0) {
-          await supabase.from("invoice_items").delete().eq("id", l.it.id);
-        } else {
-          await supabase.from("invoice_items")
-            .update({ quantity: left, total_price: toPaisa(left * Number(l.it.unit_price)) })
-            .eq("id", l.it.id);
-        }
-      }
-
-      // 3. The invoice itself: cancelled when nothing is left.
+      // 1. The invoice first — the money side must never lag behind. If this
+      //    fails, nothing else has happened yet and it's safe to retry.
       const newStatus = newTotal <= 0 ? "cancelled" : paymentStatus(newTotal, paidSoFar);
       const { error: invErr } = await supabase.from("invoices")
         .update({ total_amount: newTotal, payment_status: newStatus }).eq("id", open.id);
-      if (invErr) return toast.error(invErr.message);
+      if (invErr) return toast.error(`Nothing was changed — could not update the invoice: ${invErr.message}`);
 
-      // 4. Sales history: negative rows dated on the sale day, so reports
-      //    and the dashboard net the return out of that day's figures.
-      const saleDay = localDateOf(open.created_at) || localToday();
-      await supabase.from("customer_purchases").insert(retLines.map((l) => ({
-        customer_name: open.customer_name, product_id: l.it.product_id,
-        quantity_purchased: -l.ret, total_price: -toPaisa(l.ret * Number(l.it.unit_price)),
-        cost_price: l.it.cost_price, payment_method: "return", payment_status: "paid",
-        purchase_date: saleDay,
-      })));
-
-      // 5. Account customers: credit the khaata for the returned value.
-      if (open.client_id) {
-        await supabase.from("client_ledger").insert({
-          client_id: open.client_id, entry_type: "credit", amount: returnValue,
+      // 2. Account customers: credit the khaata.
+      if (open.client_id && ledgerCredit > 0) {
+        const { error: ledErr } = await supabase.from("client_ledger").insert({
+          client_id: open.client_id, entry_type: "credit", amount: ledgerCredit,
           reference: open.invoice_id,
           note: `Return: ${retLines.map((l) => `${l.it.product_name} × ${l.ret}`).join("; ")}`,
           entry_date: localToday(),
         });
+        if (ledErr) toast.error(`Invoice updated but the account credit FAILED — add a credit of ${money(ledgerCredit)} (ref ${open.invoice_id}) to the account manually: ${ledErr.message}`);
       }
+
+      // 3. Shrink or remove the invoice lines.
+      for (const l of retLines) {
+        const left = l.it.quantity - l.ret;
+        const { error: itemErr } = left <= 0
+          ? await supabase.from("invoice_items").delete().eq("id", l.it.id)
+          : await supabase.from("invoice_items")
+              .update({ quantity: left, total_price: toPaisa(Number(l.it.total_price) - lineReturnValue(l.it, l.ret)) })
+              .eq("id", l.it.id);
+        if (itemErr) toast.error(`Could not update the invoice line for ${l.it.product_name}: ${itemErr.message}`);
+      }
+
+      // 4. Put the returned quantities back into stock (fresh counts, so a
+      //    sale made meanwhile isn't overwritten).
+      for (const l of retLines) {
+        if (!l.it.product_id) continue;
+        const { data: prod, error: readErr } = await supabase.from("products")
+          .select("quantity_in_stock, product_name").eq("id", l.it.product_id).maybeSingle();
+        const { error: stockErr } = prod
+          ? await supabase.from("products")
+              .update({ quantity_in_stock: (Number(prod.quantity_in_stock) || 0) + l.ret })
+              .eq("id", l.it.product_id)
+          : { error: readErr };
+        if (stockErr) toast.error(`Restock FAILED for ${l.it.product_name} — add ${l.ret} back to its stock manually: ${stockErr.message}`);
+      }
+
+      // 5. Sales history: negative rows dated on the sale day, so reports
+      //    and the dashboard net the return out of that day's figures.
+      const saleDay = localDateOf(open.created_at) || localToday();
+      const { error: cpErr } = await supabase.from("customer_purchases").insert(retLines.map((l) => ({
+        customer_name: open.customer_name, product_id: l.it.product_id,
+        quantity_purchased: -l.ret, total_price: -lineReturnValue(l.it, l.ret),
+        cost_price: l.it.cost_price, payment_method: "return", payment_status: "paid",
+        purchase_date: saleDay,
+      })));
+      if (cpErr) toast.error(`Return saved, but the sales history row failed: ${cpErr.message}`);
 
       // 6. If they had paid more than what's left, hand the cash back and
       //    book it, so the daily closing shows the money going out.
-      if (refundDue > 0 && refundCash) {
-        await supabase.from("expenses").insert({
+      if (willRefundCash) {
+        const { error: expErr } = await supabase.from("expenses").insert({
           expense_type: "Customer refund", amount: refundDue,
           notes: `Refund for return on ${open.invoice_id} (${open.customer_name})`,
           date_of_expense: localToday(),
         });
+        if (expErr) toast.error(`Refund of ${money(refundDue)} was NOT booked — record it as an expense manually: ${expErr.message}`);
         if (open.client_id) {
-          await supabase.from("client_ledger").insert({
+          const { error: dbErr } = await supabase.from("client_ledger").insert({
             client_id: open.client_id, entry_type: "debit", amount: refundDue,
             reference: open.invoice_id, note: "Cash refunded for returned items",
             entry_date: localToday(),
           });
+          if (dbErr) toast.error(`Account debit for the ${money(refundDue)} refund failed — add it manually: ${dbErr.message}`);
         }
       }
 
       toast.success(newTotal <= 0
-        ? `Invoice ${open.invoice_id} cancelled — stock restored${refundDue > 0 && refundCash ? `, ${money(refundDue)} refunded` : ""}`
+        ? `Invoice ${open.invoice_id} cancelled — stock restored${willRefundCash ? `, ${money(refundDue)} refunded` : ""}`
         : `Return recorded — invoice now ${money(newTotal)}, stock restored`);
       setReturnOpen(false);
       await load();
@@ -410,7 +431,7 @@ function InvoicesAdmin() {
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{it.product_name}</div>
                   <div className="text-xs text-muted-foreground">
-                    Sold {it.quantity} @ {money(it.unit_price)}
+                    Sold {it.quantity} for {money(it.total_price)}
                   </div>
                 </div>
                 <div className="w-24 space-y-1">
@@ -431,15 +452,19 @@ function InvoicesAdmin() {
               </div>
             )}
           </div>
-          {refundDue > 0 && (
+          {refundDue > 0 && (canLeaveOnAccount ? (
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <Checkbox checked={refundCash} onCheckedChange={(v) => setRefundCash(v === true)} />
               <span>
                 Refund <b>{money(refundDue)}</b> in cash now (recorded as money out today).
-                {open?.client_id ? " Untick to leave it as credit on the account." : ""}
+                Untick to leave it as credit on the account.
               </span>
             </label>
-          )}
+          ) : (
+            <div className="text-sm">
+              Refund <b>{money(refundDue)}</b> in cash to the customer — it will be recorded as money out today.
+            </div>
+          ))}
           <Button className="w-full" variant={newTotal <= 0 ? "destructive" : "default"}
                   onClick={processReturn} disabled={processing || retLines.length === 0}>
             {processing ? "Processing..."

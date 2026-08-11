@@ -338,11 +338,11 @@ function PosPage() {
                   <SplitSquareHorizontal className="h-4 w-4 mr-1" /> Split methods
                 </Button>
               </div>
-              <Input type="number" className="h-10 font-semibold" placeholder={String(total)}
-                     value={cashReceived === "" ? (total || "") : cashReceived}
+              <Input type="number" className="h-10 font-semibold" placeholder={total ? `${total} (full bill)` : "0"}
+                     value={cashReceived}
                      onChange={(e) => setCashReceived(e.target.value)} />
               <div className="text-[11px] text-muted-foreground">
-                Full bill by default — type what was actually received; the rest stays as udhar on the account.
+                Leave blank for the full bill in cash — or type what was actually received; the rest stays as udhar on the account.
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground">Cash: <b className="text-foreground">{money(paid)}</b></span>

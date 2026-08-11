@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { paymentStatus } from "@/lib/payments";
+import { toast } from "sonner";
 
 /**
  * Spread an account payment over the client's outstanding invoices (oldest
@@ -19,7 +20,10 @@ export async function allocatePaymentToInvoices(
     .neq("payment_status", "paid")
     .neq("payment_status", "cancelled")
     .order("created_at");
-  if (error) return -1;
+  if (error) {
+    toast.error(`Payment saved, but invoice statuses could not be updated: ${error.message}`);
+    return -1;
+  }
   if (!invs?.length) return 0;
   const ids = invs.map((i) => i.id);
   const { data: pays } = await supabase.from("invoice_payments").select("invoice_id, amount").in("invoice_id", ids);
@@ -38,7 +42,10 @@ export async function allocatePaymentToInvoices(
       invoice_id: inv.id, amount: alloc, method, payment_date: payDate,
       note: "Auto-allocated from account payment",
     });
-    if (payErr) break;
+    if (payErr) {
+      toast.error(`Payment saved, but marking invoice ${inv.invoice_id} paid failed: ${payErr.message}`);
+      break;
+    }
     await supabase.from("invoices").update({
       payment_status: paymentStatus(Number(inv.total_amount), paid + alloc),
     }).eq("id", inv.id);

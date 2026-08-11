@@ -111,19 +111,26 @@ function StockAdmin() {
         byProduct.set(l.product_id, { qty: (cur?.qty ?? 0) + Number(l.quantity), unit_cost: finalOf(l) });
       }
       for (const [productId, { qty, unit_cost }] of byProduct) {
-        const prod = products.find((p) => p.id === productId);
+        const name = products.find((p) => p.id === productId)?.product_name ?? "product";
+        // Fresh read — the page may have been open a while, and a stale row
+        // here would overwrite stock counts (or a just-set selling price).
+        const { data: prod } = await supabase.from("products")
+          .select("quantity_in_stock, selling_price, purchase_price").eq("id", productId).maybeSingle();
         if (prod) {
           const upd: { quantity_in_stock: number; purchase_price: number; last_purchase_date: string; selling_price?: number } = {
-            quantity_in_stock: prod.quantity_in_stock + qty,
+            quantity_in_stock: (Number(prod.quantity_in_stock) || 0) + qty,
             purchase_price: unit_cost,
             last_purchase_date: date,
           };
-          // A product with no selling price yet would ring up as Rs 0 in the
-          // POS — give it the purchase price so it sells at list until a
-          // selling price is set on the Products page.
-          if (!(Number(prod.selling_price) > 0)) upd.selling_price = unit_cost;
+          // A product with no selling price would ring up as Rs 0 in the POS,
+          // so it gets the purchase price on arrival. It keeps tracking the
+          // cost while nobody has changed it by hand (selling == old cost) —
+          // otherwise a costlier restock would silently sell below cost. A
+          // manually set selling price is never touched.
+          const oldSell = Number(prod.selling_price) || 0;
+          if (!(oldSell > 0) || oldSell === (Number(prod.purchase_price) || 0)) upd.selling_price = unit_cost;
           const { error: updErr } = await supabase.from("products").update(upd).eq("id", productId);
-          if (updErr) toast.error(`Stock count update failed for ${prod.product_name}: ${updErr.message}`);
+          if (updErr) toast.error(`Stock count update failed for ${name}: ${updErr.message}`);
         }
       }
 

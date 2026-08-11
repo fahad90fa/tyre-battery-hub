@@ -62,7 +62,7 @@ function Dashboard() {
         supabase.from("customer_purchases").select("total_price, purchase_date, product_id, quantity_purchased"),
         supabase.from("expenses").select("amount, date_of_expense"),
         supabase.from("categories").select("id, name"),
-        supabase.from("invoice_payments").select("amount, method, payment_date"),
+        supabase.from("invoice_payments").select("amount, method, payment_date, invoices(client_id)"),
         supabase.from("client_ledger").select("amount, method, entry_date, reference").eq("entry_type", "payment"),
         supabase.from("templates").select("*", { count: "exact", head: true }),
         supabase.from("employees").select("*", { count: "exact", head: true }),
@@ -70,12 +70,15 @@ function Dashboard() {
         supabase.from("clients").select("*", { count: "exact", head: true }),
       ]);
 
-      // All money received: invoice payments + manual khaata recoveries
-      // (ledger entries referencing an INV- number already exist as invoice payments).
+      // All money received, one row per real payment: walk-in bills settle
+      // through invoice_payments; account customers settle through their
+      // ledger (their invoice_payments rows are only allocation records) —
+      // same rule as the daily closing, so nothing is counted twice.
       const received = [
-        ...(invPays ?? []).map((p) => ({ amount: Number(p.amount), date: p.payment_date as string, method: (p.method ?? "cash") as string })),
+        ...(invPays ?? [])
+          .filter((p: any) => !p.invoices?.client_id)
+          .map((p) => ({ amount: Number(p.amount), date: p.payment_date as string, method: (p.method ?? "cash") as string })),
         ...(ledgerPays ?? [])
-          .filter((l) => !l.reference || !String(l.reference).startsWith("INV-"))
           .map((l) => ({ amount: Number(l.amount), date: l.entry_date as string, method: (l.method ?? "cash") as string })),
       ];
 
