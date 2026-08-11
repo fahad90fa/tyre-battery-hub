@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Lock, Printer, TrendingUp, TrendingDown, Wallet, HandCoins, Banknote, CreditCard } from "lucide-react";
+import { Lock, Printer, TrendingUp, Wallet, HandCoins, Banknote, CreditCard } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/admin/closing")({
   component: DailyClosing,
@@ -101,11 +101,14 @@ function DailyClosing() {
         };
       }),
     ];
+    // Total amount in = payments on today's bills + recoveries of old udhar
+    // (including every recovery recorded on the Recovery page for this date).
     const totalCashIn = sumMoney(cashIn.map((r) => r.amount));
     const recoveryRows = cashIn.filter((r) => r.isRecovery);
     const recoveries = sumMoney(recoveryRows.map((r) => r.amount));
+    const salePayments = sumMoney(cashIn.filter((r) => !r.isRecovery).map((r) => r.amount));
     // Cash sales = collected today against today's bills; the rest is credit.
-    const cashSales = Math.min(netSales, totalCashIn - recoveries);
+    const cashSales = Math.min(netSales, salePayments);
     const creditSales = Math.max(0, netSales - cashSales);
 
     const byMethod: Record<string, number> = {};
@@ -113,7 +116,7 @@ function DailyClosing() {
     const totalExpenses = sumMoney(expenses.map((e) => e.amount));
     const merchantOut = sumMoney(merchantPays.map((m) => m.amount));
     return {
-      netSales, cashSales, creditSales, recoveries, totalCashIn,
+      netSales, cashSales, creditSales, recoveries, salePayments, totalCashIn,
       totalExpenses, merchantOut,
       netCash: sumMoney([totalCashIn, -totalExpenses, -merchantOut]),
       byMethod, allIn: cashIn, recoveryRows,
@@ -180,21 +183,57 @@ function DailyClosing() {
           <Kpi icon={CreditCard} label="Credit (udhar) sales" value={money(t.creditSales)} accent={t.creditSales > 0} />
           <Kpi icon={HandCoins} label="Recoveries (old udhar)" value={money(t.recoveries)} green />
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <Kpi icon={Wallet} label="Total amount in" value={money(t.totalCashIn)} green />
-          <Kpi icon={TrendingDown} label="Merchant payments" value={money(t.merchantOut)} accent={t.merchantOut > 0} />
-          <Kpi icon={TrendingDown} label="Expenses" value={money(t.totalExpenses)} accent={t.totalExpenses > 0} />
-          <Kpi icon={Wallet} label="Net amount (in − out)" value={money(t.netCash)} green={t.netCash >= 0} accent={t.netCash < 0} />
+
+        {/* The day's money as one clear statement: what came in (today's sale
+            payments + recoveries, each on its own line), then what went out
+            (merchant payments, expenses), ending at the net amount. */}
+        <div className="grid lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 rounded-2xl bg-card p-4 shadow-sm">
+            <div className="font-semibold text-sm mb-2 flex items-center gap-2">
+              <Wallet className="h-4 w-4 text-gold" /> Cash flow — {shortDate(date)}
+            </div>
+            <div className="divide-y text-sm">
+              <div className="flex justify-between py-2">
+                <span className="text-muted-foreground">Payments received on today's sales</span>
+                <b className="text-green-600">+ {money(t.salePayments)}</b>
+              </div>
+              <div className="flex justify-between py-2">
+                <span className="text-muted-foreground">Recoveries (old udhar, from the Recovery section)</span>
+                <b className="text-green-600">+ {money(t.recoveries)}</b>
+              </div>
+              <div className="flex justify-between py-2 font-bold">
+                <span>Total amount in (received today)</span>
+                <span className="text-green-600">{money(t.totalCashIn)}</span>
+              </div>
+              <div className="flex justify-between py-2">
+                <span className="text-muted-foreground">Merchant payments</span>
+                <b className="text-orange-500">− {money(t.merchantOut)}</b>
+              </div>
+              <div className="flex justify-between py-2">
+                <span className="text-muted-foreground">Expenses</span>
+                <b className="text-orange-500">− {money(t.totalExpenses)}</b>
+              </div>
+              <div className="flex justify-between py-2 text-base font-black">
+                <span>Net amount (in − out)</span>
+                <span className={t.netCash >= 0 ? "text-green-600" : "text-destructive"}>{money(t.netCash)}</span>
+              </div>
+            </div>
+          </div>
           <div className="rounded-2xl bg-card p-4 shadow-sm">
             <div className="text-[10px] uppercase text-muted-foreground tracking-wider">Received by method</div>
             <div className="mt-1 space-y-0.5">
               {Object.keys(t.byMethod).length === 0
                 ? <div className="text-xs text-muted-foreground">No payments</div>
                 : Object.entries(t.byMethod).map(([m, v]) => (
-                  <div key={m} className="flex justify-between text-xs">
+                  <div key={m} className="flex justify-between text-xs py-1">
                     <span className="text-muted-foreground">{methodLabel(m)}</span><b>{money(v)}</b>
                   </div>
                 ))}
+              {Object.keys(t.byMethod).length > 0 && (
+                <div className="flex justify-between text-xs py-1 border-t font-bold">
+                  <span>Total</span><span>{money(t.totalCashIn)}</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
