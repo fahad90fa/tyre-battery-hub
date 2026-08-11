@@ -27,3 +27,14 @@ export const applyPct = (base: number, pct: number) => {
 /** Reverse: what percentage turns `base` into `price` (1 decimal). */
 export const impliedPct = (base: number, price: number) =>
   base > 0 ? Math.round((price / base - 1) * 1000) / 10 : 0;
+
+/**
+ * The price a product sells at in POS/sales forms: its selling price when
+ * one is set, otherwise the latest purchase (merchant) price. Products
+ * booked in through a stock purchase get a price without extra data entry.
+ */
+export const effectivePrice = (p: { selling_price?: number | string | null; purchase_price?: number | string | null } | null | undefined) => {
+  if (!p) return 0;
+  const sell = Number(p.selling_price) || 0;
+  return sell > 0 ? toPaisa(sell) : toPaisa(p.purchase_price);
+};

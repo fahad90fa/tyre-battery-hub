@@ -113,11 +113,16 @@ function StockAdmin() {
       for (const [productId, { qty, unit_cost }] of byProduct) {
         const prod = products.find((p) => p.id === productId);
         if (prod) {
-          const { error: updErr } = await supabase.from("products").update({
+          const upd: { quantity_in_stock: number; purchase_price: number; last_purchase_date: string; selling_price?: number } = {
             quantity_in_stock: prod.quantity_in_stock + qty,
             purchase_price: unit_cost,
             last_purchase_date: date,
-          }).eq("id", productId);
+          };
+          // A product with no selling price yet would ring up as Rs 0 in the
+          // POS — give it the purchase price so it sells at list until a
+          // selling price is set on the Products page.
+          if (!(Number(prod.selling_price) > 0)) upd.selling_price = unit_cost;
+          const { error: updErr } = await supabase.from("products").update(upd).eq("id", productId);
           if (updErr) toast.error(`Stock count update failed for ${prod.product_name}: ${updErr.message}`);
         }
       }

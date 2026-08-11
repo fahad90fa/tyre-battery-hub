@@ -2,12 +2,15 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, shortDate, localDateOf } from "@/lib/format";
+import { money, shortDate, localDateOf, localToday } from "@/lib/format";
+import { matchesQuery } from "@/lib/search";
+import { effectivePrice } from "@/lib/pricing";
+import { printArea } from "@/lib/print";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowDownToLine, ArrowUpFromLine, Package, AlertTriangle, Search, X } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Package, AlertTriangle, Search, X, Printer } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/admin/inventory")({
   component: Inventory,
@@ -32,6 +35,14 @@ function Inventory() {
   const [tab, setTab] = useState("all");
   const [productFilter, setProductFilter] = useState("");
   const [q, setQ] = useState("");
+  const [stockPrint, setStockPrint] = useState(false);
+
+  // Render the print-only stock list, then hand it to the browser.
+  useEffect(() => {
+    if (!stockPrint) return;
+    const t = setTimeout(() => { printArea(); setStockPrint(false); }, 80);
+    return () => clearTimeout(t);
+  }, [stockPrint]);
 
   useEffect(() => {
     (async () => {
@@ -74,9 +85,18 @@ function Inventory() {
     if (tab === "in" && m.type !== "in") return false;
     if (tab === "out" && m.type !== "out") return false;
     if (productFilter && m.productId !== productFilter) return false;
-    if (q && !(`${m.product} ${m.party} ${m.ref ?? ""}`).toLowerCase().includes(q.toLowerCase())) return false;
+    if (q && !matchesQuery(`${m.product} ${m.party} ${m.ref ?? ""}`, q)) return false;
     return true;
   }), [movements, tab, productFilter, q]);
+
+  // The stock list to print: every product (or those matching the search),
+  // with quantity and prices — a physical copy of what's on the shelf.
+  const stockList = useMemo(
+    () => products.filter((p) => !q || matchesQuery(p.product_name, q)),
+    [products, q],
+  );
+  const stockListUnits = stockList.reduce((a, p) => a + (Number(p.quantity_in_stock) || 0), 0);
+  const stockListValue = stockList.reduce((a, p) => a + Number(p.purchase_price ?? 0) * (Number(p.quantity_in_stock) || 0), 0);
 
   const totalUnits = products.reduce((a, p) => a + (p.quantity_in_stock ?? 0), 0);
   const stockValue = products.reduce((a, p) => a + Number(p.purchase_price ?? 0) * (p.quantity_in_stock ?? 0), 0);
@@ -116,8 +136,12 @@ function Inventory() {
         )}
         <div className="relative flex-1 min-w-[180px] max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search party, ref..." value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
+          <Input placeholder="Search product, party, ref..." value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
         </div>
+        <Button variant="outline" onClick={() => setStockPrint(true)}
+                title="Print the current stock list (uses the search box as a filter)">
+          <Printer className="h-4 w-4 mr-2" /> Print stock list
+        </Button>
       </div>
 
       {selectedProduct && (
@@ -166,6 +190,54 @@ function Inventory() {
           </div>
         )}
       </div>
+
+      {/* Print-only stock list: hidden on screen; printArea() clones the
+          .print-area child, so the wrapper's `hidden` never reaches print. */}
+      {stockPrint && (
+        <div className="hidden">
+          <div className="print-area">
+            <div className="border-b-2 border-foreground pb-2 mb-3">
+              <div className="text-lg font-black">MT&B HOUSE — Stock List</div>
+              <div className="text-sm">
+                {shortDate(localToday())}
+                {q.trim() ? ` · search: “${q.trim()}”` : " · all products"}
+                {` · ${stockList.length} product${stockList.length === 1 ? "" : "s"} · ${stockListUnits} unit${stockListUnits === 1 ? "" : "s"}`}
+              </div>
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase border-b">
+                  <th className="py-1.5 pr-2">#</th>
+                  <th className="py-1.5 pr-2">Product</th>
+                  <th className="py-1.5 pr-2 text-right">Purchase price</th>
+                  <th className="py-1.5 pr-2 text-right">Selling price</th>
+                  <th className="py-1.5 pr-2 text-right">In stock</th>
+                  <th className="py-1.5 text-right">Stock value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stockList.map((p, i) => (
+                  <tr key={p.id} className="border-b">
+                    <td className="py-1.5 pr-2">{i + 1}</td>
+                    <td className="py-1.5 pr-2">{p.product_name}</td>
+                    <td className="py-1.5 pr-2 text-right">{money(p.purchase_price)}</td>
+                    <td className="py-1.5 pr-2 text-right">{money(effectivePrice(p))}</td>
+                    <td className="py-1.5 pr-2 text-right font-semibold">{p.quantity_in_stock ?? 0}</td>
+                    <td className="py-1.5 text-right">{money(Number(p.purchase_price ?? 0) * (Number(p.quantity_in_stock) || 0))}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="font-bold">
+                  <td className="py-2" colSpan={4}>Total</td>
+                  <td className="py-2 pr-2 text-right">{stockListUnits}</td>
+                  <td className="py-2 text-right">{money(stockListValue)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
     </AdminShell>
   );
 }
