@@ -140,24 +140,30 @@ create index if not exists amanat_items_client_idx on public.amanat_items (clien
 -- silently blanked recoveries in Daily Closing and the Recoveries page.
 -- Safe to re-run (idempotent).
 
--- 1. Remove orphaned ledger rows left behind by account deletions. The app
---    always asked "Delete this record and its ledger?" but without a foreign
---    key the ledger rows survived the delete and can no longer be shown
---    against any account.
-delete from public.client_ledger l
+-- 1. Detach orphaned ledger rows left behind by past account deletions
+--    (no foreign key existed, so the rows survived pointing at nothing).
+--    They are money that really moved, so they are kept — shown as
+--    "Customer"/"Merchant" — and only the dead link is cleared. Clearing it
+--    (rather than deleting the rows) keeps every daily closing and cash-flow
+--    total intact, and each rupee still counted exactly once.
+update public.client_ledger l
+set client_id = null
 where l.client_id is not null
   and not exists (select 1 from public.clients c where c.id = l.client_id);
 
-delete from public.merchant_ledger l
+update public.merchant_ledger l
+set merchant_id = null
 where l.merchant_id is not null
   and not exists (select 1 from public.merchants m where m.id = l.merchant_id);
 
 -- 2. Real foreign keys so PostgREST can embed clients(name)/merchants(name)
---    in ledger queries. on delete cascade keeps the app's "delete the record
---    and its ledger" behaviour, now enforced by the database.
--- Guard on ANY existing foreign key between the two tables (not just our
--- constraint name): a second FK on the same pair would make PostgREST's
--- embed ambiguous instead of fixing it.
+--    in ledger queries. ON DELETE RESTRICT: an account with money history
+--    can no longer be deleted outright (delete its ledger entries first) —
+--    a cascade here would silently erase recorded payments from every
+--    daily-closing and cash-flow report.
+--    Guard on ANY existing foreign key between the two tables (not just our
+--    constraint name): a second FK on the same pair would make PostgREST's
+--    embed ambiguous instead of fixing it.
 do $$
 begin
   if not exists (
@@ -168,7 +174,7 @@ begin
   ) then
     alter table public.client_ledger
       add constraint client_ledger_client_id_fkey
-      foreign key (client_id) references public.clients(id) on delete cascade;
+      foreign key (client_id) references public.clients(id) on delete restrict;
   end if;
 
   if not exists (
@@ -179,7 +185,7 @@ begin
   ) then
     alter table public.merchant_ledger
       add constraint merchant_ledger_merchant_id_fkey
-      foreign key (merchant_id) references public.merchants(id) on delete cascade;
+      foreign key (merchant_id) references public.merchants(id) on delete restrict;
   end if;
 end $$;
 

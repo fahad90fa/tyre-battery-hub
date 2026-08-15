@@ -441,7 +441,10 @@ function PosPage() {
                 </tr>
               </thead>
               <tbody>
-                {matches.map((p, i) => (
+                {/* Paper copy stays alphabetical — it's a lookup sheet, not a
+                    picking list, so the on-screen stock-first order would only
+                    make products harder to find. */}
+                {[...matches].sort((a, b) => (a.product_name ?? "").localeCompare(b.product_name ?? "")).map((p, i) => (
                   <tr key={p.id} className="border-b">
                     <td className="py-1.5 pr-2">{i + 1}</td>
                     <td className="py-1.5 pr-2">{p.product_name}</td>

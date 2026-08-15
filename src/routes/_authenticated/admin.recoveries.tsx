@@ -168,8 +168,10 @@ function Recoveries() {
   // under the date it happened, newest day first.
   const byDay = useMemo(() => {
     const keep = (f: Flow) => {
+      // A picked day overrides the month filter — same rule as the
+      // "Recovered on <day>" header, so the two can never disagree.
       if (day && f.date !== day) return false;
-      if (month && !(f.date ?? "").startsWith(month)) return false;
+      if (!day && month && !(f.date ?? "").startsWith(month)) return false;
       if (show === "recovery") return f.kind === "recovery";
       if (show === "in") return f.amount > 0;
       if (show === "out") return f.amount < 0;

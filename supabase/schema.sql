@@ -206,7 +206,7 @@ create table public.client_ledger (
   entry_type text,
   note text,
   reference text,
-  client_id uuid references public.clients(id) on delete cascade,
+  client_id uuid references public.clients(id) on delete restrict,
   amount numeric,
   method text
 );
@@ -214,7 +214,7 @@ create table public.client_ledger (
 create table public.merchant_ledger (
   reference text,
   id uuid primary key default gen_random_uuid(),
-  merchant_id uuid references public.merchants(id) on delete cascade,
+  merchant_id uuid references public.merchants(id) on delete restrict,
   amount numeric,
   entry_date date default current_date,
   created_at timestamptz not null default now(),

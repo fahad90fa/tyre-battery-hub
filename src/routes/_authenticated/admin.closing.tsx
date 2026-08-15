@@ -74,7 +74,10 @@ function DailyClosing() {
       .map((l: any) => l.reference)
       .filter((r: any) => typeof r === "string" && r.startsWith("INV")))] as string[];
     if (refs.length === 0) { setInvDay({}); return; }
-    const { data: refInv } = await supabase.from("invoices").select("invoice_id, created_at").in("invoice_id", refs);
+    const { data: refInv, error: refErr } = await supabase.from("invoices").select("invoice_id, created_at").in("invoice_id", refs);
+    // Without these dates every ledger payment would read as a recovery —
+    // append to the banner (functional update: the batch errors are queued).
+    if (refErr) setLoadError((prev) => [prev, `Invoice dates for the recovery check: ${refErr.message}`].filter(Boolean).join(" · "));
     setInvDay(Object.fromEntries((refInv ?? []).map((i) => [i.invoice_id, localDateOf(i.created_at)])));
   };
 
