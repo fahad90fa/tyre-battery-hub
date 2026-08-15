@@ -118,13 +118,17 @@ function DailyClosing() {
 
     const byMethod: Record<string, number> = {};
     cashIn.forEach((r) => { byMethod[r.method] = sumMoney([byMethod[r.method] ?? 0, r.amount]); });
+    // Recoveries split the same way, so a cash recovery lands in the day's
+    // cash and a bank-transfer recovery under bank — never mixed together.
+    const recByMethod: Record<string, number> = {};
+    recoveryRows.forEach((r) => { recByMethod[r.method] = sumMoney([recByMethod[r.method] ?? 0, r.amount]); });
     const totalExpenses = sumMoney(expenses.map((e) => e.amount));
     const merchantOut = sumMoney(merchantPays.map((m) => m.amount));
     return {
       netSales, cashSales, creditSales, recoveries, totalCashIn,
       totalExpenses, merchantOut,
       netCash: sumMoney([totalCashIn, -totalExpenses, -merchantOut]),
-      byMethod, allIn: cashIn, recoveryRows,
+      byMethod, recByMethod, allIn: cashIn, recoveryRows,
     };
   }, [invoices, payments, ledgerPays, merchantPays, expenses, invDay, date]);
 
@@ -199,13 +203,20 @@ function DailyClosing() {
           <Kpi icon={TrendingDown} label="Expenses" value={money(t.totalExpenses)} accent={t.totalExpenses > 0} />
           <Kpi icon={Wallet} label="Net amount (in − out)" value={money(t.netCash)} green={t.netCash >= 0} accent={t.netCash < 0} />
           <div className="rounded-2xl bg-card p-4 shadow-sm">
-            <div className="text-[10px] uppercase text-muted-foreground tracking-wider">Received by method</div>
+            <div className="text-[10px] uppercase text-muted-foreground tracking-wider">Total amount in — by method</div>
             <div className="mt-1 space-y-0.5">
               {Object.keys(t.byMethod).length === 0
                 ? <div className="text-xs text-muted-foreground">No payments</div>
                 : Object.entries(t.byMethod).map(([m, v]) => (
-                  <div key={m} className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">{methodLabel(m)}</span><b>{money(v)}</b>
+                  <div key={m}>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">{methodLabel(m)}</span><b>{money(v)}</b>
+                    </div>
+                    {t.recByMethod[m] > 0 && (
+                      <div className="flex justify-between text-[10px] text-green-600">
+                        <span>of which recoveries</span><span>{money(t.recByMethod[m])}</span>
+                      </div>
+                    )}
                   </div>
                 ))}
             </div>
@@ -230,11 +241,24 @@ function DailyClosing() {
           {/* Every recovery of the day, spelt out like the expenses list:
               who paid, how, against which bill, and how much. */}
           <Card title={`Recoveries (${t.recoveryRows.length}) — ${money(t.recoveries)}`}>
-            {t.recoveryRows.length === 0 ? <Empty /> : t.recoveryRows.map((r, i) => (
-              <Row key={i}
-                   left={<>{r.who ?? "Customer"}<div className="text-[10px] text-muted-foreground">{methodLabel(r.method)}{r.ref ? ` · ${r.ref}` : ""} · {shortDate(date)}</div></>}
-                   right={<span className="text-green-600">{money(r.amount)}</span>} />
-            ))}
+            {t.recoveryRows.length === 0 ? <Empty /> : (
+              <>
+                {t.recoveryRows.map((r, i) => (
+                  <Row key={i}
+                       left={<>{r.who ?? "Customer"}<div className="text-[10px] text-muted-foreground">{methodLabel(r.method)}{r.ref ? ` · ${r.ref}` : ""} · {shortDate(date)}</div></>}
+                       right={<span className="text-green-600">{money(r.amount)}</span>} />
+                ))}
+                <div className="pt-2">
+                  <div className="text-[10px] uppercase text-muted-foreground tracking-wider mb-1">Received by method</div>
+                  {Object.entries(t.recByMethod).map(([m, v]) => (
+                    <div key={m} className="flex justify-between text-xs py-0.5">
+                      <span className="text-muted-foreground">{methodLabel(m)}</span>
+                      <b className="text-green-600">{money(v)}</b>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </Card>
           <Card title={`Merchant payments (${merchantPays.length})`}>
             {merchantPays.length === 0 ? <Empty /> : merchantPays.map((m) => (

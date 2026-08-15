@@ -25,6 +25,7 @@ type Flow = {
   who: string;
   detail: string;
   amount: number; // positive = in, negative = out
+  method?: string; // how the money moved — cash / bank / jazzcash / ...
 };
 
 const blankReceive = () => ({ client_id: "", amount: "", method: "cash", date: localToday() });
@@ -111,6 +112,7 @@ function Recoveries() {
         who: p.invoices?.customer_name ?? "Walk-in",
         detail: `${methodLabel(p.method)}${p.invoices?.invoice_id ? ` · ${p.invoices.invoice_id}` : ""}`,
         amount: Number(p.amount),
+        method: p.method ?? "cash",
       });
     });
     // Every account (ledger) payment; same-day sale payments vs recoveries.
@@ -123,6 +125,7 @@ function Recoveries() {
         who: l.clients ? `${l.clients.account_no ? `${l.clients.account_no} · ` : ""}${l.clients.name}` : "Customer",
         detail: [methodLabel(l.method ?? "cash"), l.reference, l.note].filter(Boolean).join(" · "),
         amount: Number(l.amount),
+        method: l.method ?? "cash",
       });
     });
     // Money out: payments we made to merchants.
@@ -190,10 +193,22 @@ function Recoveries() {
   const rangeTotals = useMemo(() => {
     const inRange = flows.filter((f) =>
       day ? f.date === day : !month || (f.date ?? "").startsWith(month));
+    // Cash recoveries and bank/JazzCash recoveries are tracked apart —
+    // one bucket per payment method, plus the same split for all money in.
+    const recByMethod: Record<string, number> = {};
+    const inByMethod: Record<string, number> = {};
+    inRange.forEach((f) => {
+      if (f.amount <= 0) return;
+      const m = f.method ?? "cash";
+      inByMethod[m] = sumMoney([inByMethod[m] ?? 0, f.amount]);
+      if (f.kind === "recovery") recByMethod[m] = sumMoney([recByMethod[m] ?? 0, f.amount]);
+    });
     return {
       recovered: sumMoney(inRange.filter((f) => f.kind === "recovery").map((f) => f.amount)),
       count: inRange.filter((f) => f.kind === "recovery").length,
       days: new Set(inRange.filter((f) => f.kind === "recovery").map((f) => f.date)).size,
+      totalIn: sumMoney(inRange.filter((f) => f.amount > 0).map((f) => f.amount)),
+      recByMethod, inByMethod,
     };
   }, [flows, month, day]);
 
@@ -337,6 +352,50 @@ function Recoveries() {
           Could not load some records: {loadError}
         </div>
       )}
+
+      {/* Cash and bank-transfer recoveries tracked apart — the same
+          "received by method" split the Daily Closing shows, following
+          whatever day/month is selected above. */}
+      <div className="grid sm:grid-cols-2 gap-4 mb-4">
+        <div className="rounded-2xl bg-card p-4 shadow-sm">
+          <div className="font-semibold text-sm mb-2 flex items-center gap-2">
+            <HandCoins className="h-4 w-4 text-gold" />
+            Recoveries by method {day ? `— ${shortDate(day)}` : month ? `— ${month}` : "— all time"}
+          </div>
+          {Object.keys(rangeTotals.recByMethod).length === 0
+            ? <div className="text-xs text-muted-foreground py-2">No recoveries in this range.</div>
+            : <div className="space-y-1">
+                {Object.entries(rangeTotals.recByMethod).map(([m, v]) => (
+                  <div key={m} className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">{methodLabel(m)}</span>
+                    <b className="text-green-600">{money(v)}</b>
+                  </div>
+                ))}
+                <div className="flex justify-between text-sm border-t pt-1 mt-1 font-bold">
+                  <span>Total recovered</span><span className="text-green-600">{money(rangeTotals.recovered)}</span>
+                </div>
+              </div>}
+        </div>
+        <div className="rounded-2xl bg-card p-4 shadow-sm">
+          <div className="font-semibold text-sm mb-2 flex items-center gap-2">
+            <Wallet className="h-4 w-4 text-gold" />
+            Total amount in by method {day ? `— ${shortDate(day)}` : month ? `— ${month}` : "— all time"}
+          </div>
+          {Object.keys(rangeTotals.inByMethod).length === 0
+            ? <div className="text-xs text-muted-foreground py-2">No money received in this range.</div>
+            : <div className="space-y-1">
+                {Object.entries(rangeTotals.inByMethod).map(([m, v]) => (
+                  <div key={m} className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">{methodLabel(m)}</span>
+                    <b>{money(v)}</b>
+                  </div>
+                ))}
+                <div className="flex justify-between text-sm border-t pt-1 mt-1 font-bold">
+                  <span>Total amount in</span><span className="text-green-600">{money(rangeTotals.totalIn)}</span>
+                </div>
+              </div>}
+        </div>
+      </div>
 
       <div className="space-y-4">
         {byDay.length === 0 && !loading && (
