@@ -206,7 +206,7 @@ create table public.client_ledger (
   entry_type text,
   note text,
   reference text,
-  client_id uuid,
+  client_id uuid references public.clients(id) on delete cascade,
   amount numeric,
   method text
 );
@@ -214,7 +214,7 @@ create table public.client_ledger (
 create table public.merchant_ledger (
   reference text,
   id uuid primary key default gen_random_uuid(),
-  merchant_id uuid,
+  merchant_id uuid references public.merchants(id) on delete cascade,
   amount numeric,
   entry_date date default current_date,
   created_at timestamptz not null default now(),
@@ -298,6 +298,10 @@ create index if not exists quotation_items_quotation_id_idx on public.quotation_
 create index if not exists invoice_payments_invoice_id_idx on public.invoice_payments (invoice_id);
 create index if not exists invoice_payments_payment_date_idx on public.invoice_payments (payment_date);
 create index if not exists invoices_client_id_idx on public.invoices (client_id);
+create index if not exists client_ledger_client_id_idx on public.client_ledger (client_id);
+create index if not exists client_ledger_entry_date_idx on public.client_ledger (entry_date);
+create index if not exists merchant_ledger_merchant_id_idx on public.merchant_ledger (merchant_id);
+create index if not exists merchant_ledger_entry_date_idx on public.merchant_ledger (entry_date);
 
 create table public.daily_closings (
   id uuid primary key default gen_random_uuid(),

@@ -35,6 +35,7 @@ function DailyClosing() {
   const [cashInHand, setCashInHand] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   const load = async () => {
     // Only the chosen day's invoices — fetching the whole table risked the
@@ -45,7 +46,7 @@ function DailyClosing() {
 
     // Sales come from INVOICES (the one record every sale creates) so the
     // figures can never be blank because a secondary table missed a row.
-    const [{ data: inv }, { data: ip }, { data: lp }, { data: mp }, { data: ex }, { data: cl }, { data: hist }] = await Promise.all([
+    const [invR, ipR, lpR, mpR, exR, clR, histR] = await Promise.all([
       // Cancelled (returned) invoices are no longer sales.
       supabase.from("invoices").select("id, invoice_id, customer_name, total_amount, created_at, client_id")
         .gte("created_at", dayStart.toISOString()).lt("created_at", dayEnd.toISOString())
@@ -57,9 +58,13 @@ function DailyClosing() {
       supabase.from("daily_closings").select("*").eq("closing_date", date).maybeSingle(),
       supabase.from("daily_closings").select("*").order("closing_date", { ascending: false }).limit(14),
     ]);
+    // A failed query must never read as "Rs 0" — say what broke instead.
+    setLoadError([invR.error, ipR.error, lpR.error, mpR.error, exR.error, clR.error, histR.error]
+      .filter(Boolean).map((e) => e!.message).join(" · "));
+    const inv = invR.data, lp = lpR.data, cl = clR.data;
     setInvoices(inv ?? []);
-    setPayments(ip ?? []); setLedgerPays(lp ?? []); setMerchantPays(mp ?? []); setExpenses(ex ?? []);
-    setClosing(cl ?? null); setHistory(hist ?? []);
+    setPayments(ipR.data ?? []); setLedgerPays(lp ?? []); setMerchantPays(mpR.data ?? []); setExpenses(exR.data ?? []);
+    setClosing(cl ?? null); setHistory(histR.data ?? []);
     setCashInHand(cl?.cash_in_hand != null ? String(cl.cash_in_hand) : "");
     setNotes(cl?.notes ?? "");
 
@@ -167,6 +172,11 @@ function DailyClosing() {
           You are viewing and closing <b>{shortDate(date)}</b>, not today. All figures and the saved report belong to that date.
         </div>
       )}
+      {loadError && (
+        <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive print:hidden">
+          Some figures could not be loaded, so the totals below may be incomplete: {loadError}
+        </div>
+      )}
 
       <div className="print-area space-y-4">
         <div className="hidden print:block text-center border-b-2 border-foreground pb-2">
@@ -199,7 +209,7 @@ function DailyClosing() {
           </div>
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <Card title={`Sales (${invoices.length})`}>
             {invoices.length === 0 ? <Empty /> : invoices.map((i) => (
               <Row key={i.id}
@@ -212,6 +222,15 @@ function DailyClosing() {
               <Row key={i}
                    left={<>{p.who ?? "Walk-in"}<div className="text-[10px] text-muted-foreground">{methodLabel(p.method)}{p.ref ? ` · ${p.ref}` : ""}{p.isRecovery ? " · recovery of an older bill" : " · today's sale"}</div></>}
                    right={<span className="text-green-600">{money(p.amount)}</span>} />
+            ))}
+          </Card>
+          {/* Every recovery of the day, spelt out like the expenses list:
+              who paid, how, against which bill, and how much. */}
+          <Card title={`Recoveries (${t.recoveryRows.length}) — ${money(t.recoveries)}`}>
+            {t.recoveryRows.length === 0 ? <Empty /> : t.recoveryRows.map((r, i) => (
+              <Row key={i}
+                   left={<>{r.who ?? "Customer"}<div className="text-[10px] text-muted-foreground">{methodLabel(r.method)}{r.ref ? ` · ${r.ref}` : ""} · {shortDate(date)}</div></>}
+                   right={<span className="text-green-600">{money(r.amount)}</span>} />
             ))}
           </Card>
           <Card title={`Merchant payments (${merchantPays.length})`}>

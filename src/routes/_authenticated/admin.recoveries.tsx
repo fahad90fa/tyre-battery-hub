@@ -41,6 +41,7 @@ function Recoveries() {
   const [loading, setLoading] = useState(true);
   const [show, setShow] = useState<"all" | "recovery" | "in" | "out">("all");
   const [month, setMonth] = useState("");            // "" = every month
+  const [day, setDay] = useState("");                // "" = every day; set = that exact date only
   const [receive, setReceive] = useState(blankReceive);
   const [savingReceive, setSavingReceive] = useState(false);
 
@@ -167,6 +168,7 @@ function Recoveries() {
   // under the date it happened, newest day first.
   const byDay = useMemo(() => {
     const keep = (f: Flow) => {
+      if (day && f.date !== day) return false;
       if (month && !(f.date ?? "").startsWith(month)) return false;
       if (show === "recovery") return f.kind === "recovery";
       if (show === "in") return f.amount > 0;
@@ -180,17 +182,18 @@ function Recoveries() {
       map.get(d)!.push(f);
     });
     return [...map.entries()].slice(0, 120);
-  }, [flows, show, month]);
+  }, [flows, show, month, day]);
 
-  // Totals for whatever range is on screen (a month, or everything).
+  // Totals for whatever range is on screen (a day, a month, or everything).
   const rangeTotals = useMemo(() => {
-    const inRange = flows.filter((f) => !month || (f.date ?? "").startsWith(month));
+    const inRange = flows.filter((f) =>
+      day ? f.date === day : !month || (f.date ?? "").startsWith(month));
     return {
       recovered: sumMoney(inRange.filter((f) => f.kind === "recovery").map((f) => f.amount)),
       count: inRange.filter((f) => f.kind === "recovery").length,
       days: new Set(inRange.filter((f) => f.kind === "recovery").map((f) => f.date)).size,
     };
-  }, [flows, month]);
+  }, [flows, month, day]);
 
   const today = localToday();
   const t = useMemo(() => {
@@ -309,12 +312,15 @@ function Recoveries() {
             </button>
           ))}
         </div>
+        <span className="text-xs text-muted-foreground ml-1">Day</span>
+        <Input type="date" value={day} max={localToday()} onChange={(e) => setDay(e.target.value)} className="h-8 w-40 text-xs" />
+        {day && <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setDay("")}>Clear day</Button>}
         <span className="text-xs text-muted-foreground ml-1">Month</span>
         <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="h-8 w-40 text-xs" />
         {month && <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setMonth("")}>Clear month</Button>}
         <div className="ml-auto flex items-center gap-3">
           <span className="text-xs text-muted-foreground">
-            Recovered {month ? `in ${month}` : "in total"}:{" "}
+            Recovered {day ? `on ${shortDate(day)}` : month ? `in ${month}` : "in total"}:{" "}
             <b className="text-green-600">{money(rangeTotals.recovered)}</b>
             {rangeTotals.count > 0 && ` · ${rangeTotals.count} payment${rangeTotals.count > 1 ? "s" : ""} over ${rangeTotals.days} day${rangeTotals.days > 1 ? "s" : ""}`}
           </span>
@@ -334,8 +340,8 @@ function Recoveries() {
         {byDay.length === 0 && !loading && (
           <div className="rounded-2xl bg-card p-10 text-center text-muted-foreground shadow-sm">
             {show === "recovery"
-              ? `No recoveries recorded${month ? " in this month" : " yet"}. A recovery is a payment received against a bill raised on an earlier day.`
-              : `No cash movements${month ? " in this month" : " yet"}.`}
+              ? `No recoveries recorded${day ? ` on ${shortDate(day)}` : month ? " in this month" : " yet"}. A recovery is a payment received against a bill raised on an earlier day.`
+              : `No cash movements${day ? ` on ${shortDate(day)}` : month ? " in this month" : " yet"}.`}
           </div>
         )}
         {byDay.map(([day, list]) => {
