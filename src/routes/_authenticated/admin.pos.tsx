@@ -4,7 +4,7 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
-import { effectivePrice } from "@/lib/pricing";
+import { effectivePrice, inStockFirst } from "@/lib/pricing";
 import { matchesQuery } from "@/lib/search";
 import { printArea } from "@/lib/print";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
@@ -55,15 +55,10 @@ function PosPage() {
   // "Bandalayar 12 Evergreen" and "Evergreen Bandalayar 12" both match.
   // Products with stock come first (alphabetical); out-of-stock ones sink
   // to the very bottom so the sellable items are always in front.
-  const matches = useMemo(() => {
-    const list = q.trim() ? products.filter((p) => matchesQuery(p.product_name, q)) : products;
-    return [...list].sort((a, b) => {
-      const inA = (Number(a.quantity_in_stock) || 0) > 0;
-      const inB = (Number(b.quantity_in_stock) || 0) > 0;
-      if (inA !== inB) return inA ? -1 : 1;
-      return (a.product_name ?? "").localeCompare(b.product_name ?? "");
-    });
-  }, [products, q]);
+  const matches = useMemo(
+    () => inStockFirst(q.trim() ? products.filter((p) => matchesQuery(p.product_name, q)) : products),
+    [products, q],
+  );
   const filtered = useMemo(() => matches.slice(0, q.trim() ? 60 : 30), [matches, q]);
 
   // Render the print-only stock list, then hand it to the browser.

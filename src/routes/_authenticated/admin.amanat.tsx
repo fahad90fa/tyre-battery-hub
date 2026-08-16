@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { shortDate, localToday } from "@/lib/format";
+import { inStockFirst } from "@/lib/pricing";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +34,7 @@ function AmanatPage() {
   const load = async () => {
     const [{ data: a }, { data: p }, { data: c }] = await Promise.all([
       supabase.from("amanat_items").select("*").order("given_date", { ascending: false }).order("created_at", { ascending: false }),
-      supabase.from("products").select("id, product_name").order("product_name"),
+      supabase.from("products").select("id, product_name, quantity_in_stock").order("product_name"),
       supabase.from("clients").select("id, name, account_no, phone").order("name"),
     ]);
     setRows(a ?? []); setProducts(p ?? []); setClients(c ?? []);
@@ -145,7 +146,7 @@ function AmanatPage() {
 
           <div className="space-y-1.5"><Label>Item <span className="text-destructive">*</span></Label>
             <SearchableSelect
-              options={products.map((p) => ({ value: p.id, label: p.product_name }))}
+              options={inStockFirst(products).map((p) => ({ value: p.id, label: p.product_name, hint: `${p.quantity_in_stock ?? 0} in stock` }))}
               value={form.product_id}
               onValueChange={(v) => {
                 const p = products.find((x) => x.id === v);

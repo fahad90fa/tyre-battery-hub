@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money } from "@/lib/format";
+import { inStockFirst } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,7 +37,10 @@ function ProductsAdmin() {
       supabase.from("subcategories").select("id, name, category_id"),
       supabase.from("brands").select("id, name"),
     ]);
-    setRows(p ?? []); setCats(c ?? []); setSubs(s ?? []); setBrands(b ?? []);
+    // In-stock products first, out-of-stock at the end; newest first within
+    // each group (the order this table always used).
+    setRows(inStockFirst(p ?? [], (a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? "")));
+    setCats(c ?? []); setSubs(s ?? []); setBrands(b ?? []);
   };
   useEffect(() => { load(); }, []);
 
