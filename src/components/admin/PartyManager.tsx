@@ -95,9 +95,13 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
     setOpen(false); setEditing(null); setForm(empty); load();
   };
   const remove = async (id: string) => {
-    if (!confirm("Delete this record and its ledger?")) return;
+    if (!confirm("Delete this account?")) return;
     const { error } = await supabase.from(kind).delete().eq("id", id);
-    if (error) return toast.error(error.message);
+    // The DB refuses to delete an account with ledger history (23503) —
+    // those money records are part of the daily closings.
+    if (error) return toast.error(error.code === "23503"
+      ? "This account has ledger history, so it cannot be deleted — its payments are part of your daily records. Remove its ledger entries first if you really want it gone."
+      : error.message);
     toast.success("Deleted"); load();
   };
   const edit = (r: any) => { setEditing(r.id); setForm({ ...empty, ...r }); setOpen(true); };

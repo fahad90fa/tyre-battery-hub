@@ -4,7 +4,7 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
-import { effectivePrice } from "@/lib/pricing";
+import { effectivePrice, inStockFirst } from "@/lib/pricing";
 import { matchesQuery } from "@/lib/search";
 import { printArea } from "@/lib/print";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
@@ -53,8 +53,10 @@ function PosPage() {
 
   // Every typed word must appear in the name, in any order — so
   // "Bandalayar 12 Evergreen" and "Evergreen Bandalayar 12" both match.
+  // Products with stock come first (alphabetical); out-of-stock ones sink
+  // to the very bottom so the sellable items are always in front.
   const matches = useMemo(
-    () => (q.trim() ? products.filter((p) => matchesQuery(p.product_name, q)) : products),
+    () => inStockFirst(q.trim() ? products.filter((p) => matchesQuery(p.product_name, q)) : products),
     [products, q],
   );
   const filtered = useMemo(() => matches.slice(0, q.trim() ? 60 : 30), [matches, q]);
@@ -434,7 +436,10 @@ function PosPage() {
                 </tr>
               </thead>
               <tbody>
-                {matches.map((p, i) => (
+                {/* Paper copy stays alphabetical — it's a lookup sheet, not a
+                    picking list, so the on-screen stock-first order would only
+                    make products harder to find. */}
+                {[...matches].sort((a, b) => (a.product_name ?? "").localeCompare(b.product_name ?? "")).map((p, i) => (
                   <tr key={p.id} className="border-b">
                     <td className="py-1.5 pr-2">{i + 1}</td>
                     <td className="py-1.5 pr-2">{p.product_name}</td>

@@ -4,7 +4,7 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
-import { effectivePrice, toPaisa } from "@/lib/pricing";
+import { effectivePrice, inStockFirst, toPaisa } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -169,7 +169,7 @@ function CustomersAdmin() {
           </div>
           <div className="space-y-1.5"><Label>Product</Label>
             <SearchableSelect
-              options={products.map((p) => ({
+              options={inStockFirst(products).map((p) => ({
                 value: p.id, label: p.product_name,
                 hint: `${money(effectivePrice(p))} · ${p.quantity_in_stock} in stock`,
               }))}

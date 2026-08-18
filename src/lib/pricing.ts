@@ -29,6 +29,23 @@ export const impliedPct = (base: number, price: number) =>
   base > 0 ? Math.round((price / base - 1) * 1000) / 10 : 0;
 
 /**
+ * In-stock products first, out-of-stock at the very end — every product
+ * list and picker in the app follows this one rule, so what can actually
+ * be sold is always in front. Alphabetical within each group unless a
+ * different tiebreak (e.g. newest first) is given. Returns a copy.
+ */
+export const inStockFirst = <T extends { quantity_in_stock?: number | string | null; product_name?: string | null }>(
+  list: T[],
+  tiebreak: (a: T, b: T) => number = (a, b) => (a.product_name ?? "").localeCompare(b.product_name ?? ""),
+): T[] =>
+  [...list].sort((a, b) => {
+    const inA = (Number(a.quantity_in_stock) || 0) > 0;
+    const inB = (Number(b.quantity_in_stock) || 0) > 0;
+    if (inA !== inB) return inA ? -1 : 1;
+    return tiebreak(a, b);
+  });
+
+/**
  * The price a product sells at in POS/sales forms: its selling price when
  * one is set, otherwise the latest purchase (merchant) price. Products
  * booked in through a stock purchase get a price without extra data entry.

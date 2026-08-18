@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteShell } from "@/components/site/SiteShell";
 import { money } from "@/lib/format";
+import { inStockFirst } from "@/lib/pricing";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,6 +24,7 @@ type Product = {
   id: string; product_name: string; image_url: string | null;
   selling_price: number; quantity_in_stock: number;
   category_id: string | null; brand_id: string | null;
+  created_at: string | null;
 };
 
 function Shop() {
@@ -46,10 +48,15 @@ function Shop() {
     })();
   }, []);
 
-  const filtered = (products ?? []).filter((p) =>
-    (cat === "all" || p.category_id === cat) &&
-    (brand === "all" || p.brand_id === brand) &&
-    (q === "" || p.product_name.toLowerCase().includes(q.toLowerCase()))
+  // In-stock products lead, out-of-stock close the list; newest first
+  // within each group (the order this catalog always used).
+  const filtered = inStockFirst(
+    (products ?? []).filter((p) =>
+      (cat === "all" || p.category_id === cat) &&
+      (brand === "all" || p.brand_id === brand) &&
+      (q === "" || p.product_name.toLowerCase().includes(q.toLowerCase()))
+    ),
+    (a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""),
   );
 
   return (

@@ -4,7 +4,7 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate, localDateOf, localToday } from "@/lib/format";
 import { matchesQuery } from "@/lib/search";
-import { effectivePrice } from "@/lib/pricing";
+import { effectivePrice, inStockFirst } from "@/lib/pricing";
 import { printArea } from "@/lib/print";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { Input } from "@/components/ui/input";
@@ -123,7 +123,7 @@ function Inventory() {
         </Tabs>
         <div className="w-64">
           <SearchableSelect
-            options={products.map((p) => ({ value: p.id, label: p.product_name, hint: `${p.quantity_in_stock} in stock` }))}
+            options={inStockFirst(products).map((p) => ({ value: p.id, label: p.product_name, hint: `${p.quantity_in_stock} in stock` }))}
             value={productFilter}
             onValueChange={setProductFilter}
             placeholder="Filter by product"

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
-import { applyPct, sumMoney } from "@/lib/pricing";
+import { applyPct, inStockFirst, sumMoney } from "@/lib/pricing";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -192,7 +192,7 @@ function StockAdmin() {
                 <div className="flex gap-1.5 items-center">
                   <div className="flex-1 min-w-0">
                     <SearchableSelect
-                      options={products.map((p) => ({ value: p.id, label: p.product_name, hint: `stock ${p.quantity_in_stock}` }))}
+                      options={inStockFirst(products).map((p) => ({ value: p.id, label: p.product_name, hint: `stock ${p.quantity_in_stock}` }))}
                       value={l.product_id}
                       onValueChange={(v) => {
                         const p = products.find((x) => x.id === v);

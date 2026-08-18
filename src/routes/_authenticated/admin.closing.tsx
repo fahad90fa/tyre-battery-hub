@@ -35,6 +35,7 @@ function DailyClosing() {
   const [cashInHand, setCashInHand] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   const load = async () => {
     // Only the chosen day's invoices — fetching the whole table risked the
@@ -45,7 +46,7 @@ function DailyClosing() {
 
     // Sales come from INVOICES (the one record every sale creates) so the
     // figures can never be blank because a secondary table missed a row.
-    const [{ data: inv }, { data: ip }, { data: lp }, { data: mp }, { data: ex }, { data: cl }, { data: hist }] = await Promise.all([
+    const [invR, ipR, lpR, mpR, exR, clR, histR] = await Promise.all([
       // Cancelled (returned) invoices are no longer sales.
       supabase.from("invoices").select("id, invoice_id, customer_name, total_amount, created_at, client_id")
         .gte("created_at", dayStart.toISOString()).lt("created_at", dayEnd.toISOString())
@@ -57,9 +58,13 @@ function DailyClosing() {
       supabase.from("daily_closings").select("*").eq("closing_date", date).maybeSingle(),
       supabase.from("daily_closings").select("*").order("closing_date", { ascending: false }).limit(14),
     ]);
+    // A failed query must never read as "Rs 0" — say what broke instead.
+    setLoadError([invR.error, ipR.error, lpR.error, mpR.error, exR.error, clR.error, histR.error]
+      .filter(Boolean).map((e) => e!.message).join(" · "));
+    const inv = invR.data, lp = lpR.data, cl = clR.data;
     setInvoices(inv ?? []);
-    setPayments(ip ?? []); setLedgerPays(lp ?? []); setMerchantPays(mp ?? []); setExpenses(ex ?? []);
-    setClosing(cl ?? null); setHistory(hist ?? []);
+    setPayments(ipR.data ?? []); setLedgerPays(lp ?? []); setMerchantPays(mpR.data ?? []); setExpenses(exR.data ?? []);
+    setClosing(cl ?? null); setHistory(histR.data ?? []);
     setCashInHand(cl?.cash_in_hand != null ? String(cl.cash_in_hand) : "");
     setNotes(cl?.notes ?? "");
 
@@ -69,7 +74,10 @@ function DailyClosing() {
       .map((l: any) => l.reference)
       .filter((r: any) => typeof r === "string" && r.startsWith("INV")))] as string[];
     if (refs.length === 0) { setInvDay({}); return; }
-    const { data: refInv } = await supabase.from("invoices").select("invoice_id, created_at").in("invoice_id", refs);
+    const { data: refInv, error: refErr } = await supabase.from("invoices").select("invoice_id, created_at").in("invoice_id", refs);
+    // Without these dates every ledger payment would read as a recovery —
+    // append to the banner (functional update: the batch errors are queued).
+    if (refErr) setLoadError((prev) => [prev, `Invoice dates for the recovery check: ${refErr.message}`].filter(Boolean).join(" · "));
     setInvDay(Object.fromEntries((refInv ?? []).map((i) => [i.invoice_id, localDateOf(i.created_at)])));
   };
 
@@ -110,13 +118,17 @@ function DailyClosing() {
 
     const byMethod: Record<string, number> = {};
     cashIn.forEach((r) => { byMethod[r.method] = sumMoney([byMethod[r.method] ?? 0, r.amount]); });
+    // Recoveries split the same way, so a cash recovery lands in the day's
+    // cash and a bank-transfer recovery under bank — never mixed together.
+    const recByMethod: Record<string, number> = {};
+    recoveryRows.forEach((r) => { recByMethod[r.method] = sumMoney([recByMethod[r.method] ?? 0, r.amount]); });
     const totalExpenses = sumMoney(expenses.map((e) => e.amount));
     const merchantOut = sumMoney(merchantPays.map((m) => m.amount));
     return {
       netSales, cashSales, creditSales, recoveries, totalCashIn,
       totalExpenses, merchantOut,
       netCash: sumMoney([totalCashIn, -totalExpenses, -merchantOut]),
-      byMethod, allIn: cashIn, recoveryRows,
+      byMethod, recByMethod, allIn: cashIn, recoveryRows,
     };
   }, [invoices, payments, ledgerPays, merchantPays, expenses, invDay, date]);
 
@@ -167,6 +179,11 @@ function DailyClosing() {
           You are viewing and closing <b>{shortDate(date)}</b>, not today. All figures and the saved report belong to that date.
         </div>
       )}
+      {loadError && (
+        <div className="mb-4 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive print:hidden">
+          Some figures could not be loaded, so the totals below may be incomplete: {loadError}
+        </div>
+      )}
 
       <div className="print-area space-y-4">
         <div className="hidden print:block text-center border-b-2 border-foreground pb-2">
@@ -186,20 +203,27 @@ function DailyClosing() {
           <Kpi icon={TrendingDown} label="Expenses" value={money(t.totalExpenses)} accent={t.totalExpenses > 0} />
           <Kpi icon={Wallet} label="Net amount (in − out)" value={money(t.netCash)} green={t.netCash >= 0} accent={t.netCash < 0} />
           <div className="rounded-2xl bg-card p-4 shadow-sm">
-            <div className="text-[10px] uppercase text-muted-foreground tracking-wider">Received by method</div>
+            <div className="text-[10px] uppercase text-muted-foreground tracking-wider">Total amount in — by method</div>
             <div className="mt-1 space-y-0.5">
               {Object.keys(t.byMethod).length === 0
                 ? <div className="text-xs text-muted-foreground">No payments</div>
                 : Object.entries(t.byMethod).map(([m, v]) => (
-                  <div key={m} className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">{methodLabel(m)}</span><b>{money(v)}</b>
+                  <div key={m}>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">{methodLabel(m)}</span><b>{money(v)}</b>
+                    </div>
+                    {t.recByMethod[m] > 0 && (
+                      <div className="flex justify-between text-[10px] text-green-600">
+                        <span>of which recoveries</span><span>{money(t.recByMethod[m])}</span>
+                      </div>
+                    )}
                   </div>
                 ))}
             </div>
           </div>
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <Card title={`Sales (${invoices.length})`}>
             {invoices.length === 0 ? <Empty /> : invoices.map((i) => (
               <Row key={i.id}
@@ -213,6 +237,28 @@ function DailyClosing() {
                    left={<>{p.who ?? "Walk-in"}<div className="text-[10px] text-muted-foreground">{methodLabel(p.method)}{p.ref ? ` · ${p.ref}` : ""}{p.isRecovery ? " · recovery of an older bill" : " · today's sale"}</div></>}
                    right={<span className="text-green-600">{money(p.amount)}</span>} />
             ))}
+          </Card>
+          {/* Every recovery of the day, spelt out like the expenses list:
+              who paid, how, against which bill, and how much. */}
+          <Card title={`Recoveries (${t.recoveryRows.length}) — ${money(t.recoveries)}`}>
+            {t.recoveryRows.length === 0 ? <Empty /> : (
+              <>
+                {t.recoveryRows.map((r, i) => (
+                  <Row key={i}
+                       left={<>{r.who ?? "Customer"}<div className="text-[10px] text-muted-foreground">{methodLabel(r.method)}{r.ref ? ` · ${r.ref}` : ""} · {shortDate(date)}</div></>}
+                       right={<span className="text-green-600">{money(r.amount)}</span>} />
+                ))}
+                <div className="pt-2">
+                  <div className="text-[10px] uppercase text-muted-foreground tracking-wider mb-1">Received by method</div>
+                  {Object.entries(t.recByMethod).map(([m, v]) => (
+                    <div key={m} className="flex justify-between text-xs py-0.5">
+                      <span className="text-muted-foreground">{methodLabel(m)}</span>
+                      <b className="text-green-600">{money(v)}</b>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </Card>
           <Card title={`Merchant payments (${merchantPays.length})`}>
             {merchantPays.length === 0 ? <Empty /> : merchantPays.map((m) => (

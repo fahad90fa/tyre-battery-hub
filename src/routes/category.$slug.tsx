@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteShell } from "@/components/site/SiteShell";
 import { money } from "@/lib/format";
+import { inStockFirst } from "@/lib/pricing";
 
 export const Route = createFileRoute("/category/$slug")({
   component: CategoryPage,
@@ -19,7 +20,7 @@ function CategoryPage() {
       setCat(c);
       if (c) {
         const { data: p } = await supabase.from("products").select("*").eq("category_id", c.id);
-        setProducts(p ?? []);
+        setProducts(inStockFirst(p ?? []));
       }
     })();
   }, [slug]);
