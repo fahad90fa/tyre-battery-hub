@@ -7,6 +7,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { COMPANY } from "@/lib/company";
 
 export function Navbar() {
   const [dark, setDark] = useState(false);
@@ -47,11 +48,11 @@ export function Navbar() {
               <Wrench className="h-5 w-5" />
             </div>
             <div className="leading-tight min-w-0">
-              <div className="font-extrabold tracking-tight text-foreground whitespace-nowrap">
+              <div className="font-extrabold tracking-tight text-foreground truncate">
                 Muzaffar <span className="text-gold">Tyres & Batteries</span>
               </div>
               <div className="text-[10px] text-gold tracking-wide truncate">
-                Muzaffar Tyre And Battery House
+                {COMPANY.tagline}
               </div>
             </div>
           </Link>
@@ -138,7 +139,7 @@ function MobileMenu({ open, onClose, dark, onToggleTheme }: { open: boolean; onC
           </div>
           <div className="leading-tight">
             <div className="font-extrabold text-sm">Muzaffar <span className="text-gold">Tyres & Batteries</span></div>
-            <div className="text-[10px] text-gold">Muzaffar Tyre And Battery House</div>
+            <div className="text-[10px] text-gold truncate">{COMPANY.tagline}</div>
           </div>
         </div>
 

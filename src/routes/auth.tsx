@@ -146,7 +146,7 @@ function AuthPage() {
               <div className="font-extrabold text-lg tracking-tight">
                 Muzaffar <span className="text-gold">Tyres & Batteries</span>
               </div>
-              <div className="text-[11px] text-gold/90">Muzaffar Tyre And Battery House</div>
+              <div className="text-[11px] text-gold/90">{COMPANY.tagline}</div>
             </div>
           </Link>
         </motion.div>
