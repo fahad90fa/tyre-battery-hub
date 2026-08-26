@@ -187,6 +187,23 @@ begin
       add constraint merchant_ledger_merchant_id_fkey
       foreign key (merchant_id) references public.merchants(id) on delete restrict;
   end if;
+
+  -- Purchase rows embed the product name the same way — make sure that
+  -- relationship exists too (set null keeps the purchase history when a
+  -- product is removed).
+  if not exists (
+    select 1 from pg_constraint
+    where contype = 'f'
+      and conrelid = 'public.stock_purchases'::regclass
+      and confrelid = 'public.products'::regclass
+  ) then
+    update public.stock_purchases sp set product_id = null
+    where sp.product_id is not null
+      and not exists (select 1 from public.products p where p.id = sp.product_id);
+    alter table public.stock_purchases
+      add constraint stock_purchases_product_id_fkey
+      foreign key (product_id) references public.products(id) on delete set null;
+  end if;
 end $$;
 
 create index if not exists client_ledger_client_id_idx on public.client_ledger (client_id);

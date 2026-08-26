@@ -9,11 +9,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search } from "lucide-react";
+import { COMPANY } from "@/lib/company";
 
 export const Route = createFileRoute("/shop")({
   head: () => ({
     meta: [
-      { title: "Shop — MT&B HOUSE" },
+      { title: `Shop — ${COMPANY.name}` },
       { name: "description", content: "Browse tyres, batteries, tubes and car care products." },
     ],
   }),

@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Lock, Printer, TrendingUp, TrendingDown, Wallet, HandCoins, Banknote, CreditCard } from "lucide-react";
+import { COMPANY } from "@/lib/company";
 
 export const Route = createFileRoute("/_authenticated/admin/closing")({
   component: DailyClosing,
@@ -187,7 +188,7 @@ function DailyClosing() {
 
       <div className="print-area space-y-4">
         <div className="hidden print:block text-center border-b-2 border-foreground pb-2">
-          <div className="text-lg font-black">MT&B HOUSE — Daily Closing Report</div>
+          <div className="text-lg font-black">{COMPANY.name} — Daily Closing Report</div>
           <div className="text-sm">{shortDate(date)}</div>
         </div>
 

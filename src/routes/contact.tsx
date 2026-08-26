@@ -9,11 +9,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { COMPANY } from "@/lib/company";
 
 export const Route = createFileRoute("/contact")({
   head: () => ({
     meta: [
-      { title: "Contact — MT&B HOUSE" },
+      { title: `Contact — ${COMPANY.name}` },
       { name: "description", content: "Get in touch with Muzaffar Tyre And Battery House." },
     ],
   }),

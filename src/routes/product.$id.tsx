@@ -6,6 +6,7 @@ import { money } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MessageCircle, ArrowLeft } from "lucide-react";
+import { COMPANY } from "@/lib/company";
 
 export const Route = createFileRoute("/product/$id")({
   component: ProductDetail,
@@ -30,7 +31,7 @@ function ProductDetail() {
   if (loading) return <SiteShell><div className="p-6"><Skeleton className="h-96" /></div></SiteShell>;
   if (!p) return <SiteShell><div className="p-16 text-center text-muted-foreground">Product not found.</div></SiteShell>;
 
-  const wa = `https://wa.me/?text=${encodeURIComponent(`Hi, I'm interested in ${p.product_name} (${money(p.selling_price)}) from MT&B HOUSE.`)}`;
+  const wa = `https://wa.me/?text=${encodeURIComponent(`Hi, I'm interested in ${p.product_name} (${money(p.selling_price)}) from ${COMPANY.name}.`)}`;
 
   return (
     <SiteShell>

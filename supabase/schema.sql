@@ -104,7 +104,7 @@ create table public.stock_purchases (
   id uuid primary key default gen_random_uuid(),
   purchase_price numeric,
   supplier_name text,
-  product_id uuid,
+  product_id uuid references public.products(id) on delete set null,
   created_at timestamptz not null default now(),
   reference text,
   merchant_id uuid

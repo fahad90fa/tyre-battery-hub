@@ -74,25 +74,42 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
                 <span>Due date</span><span className="text-orange-500 font-medium">{shortDate(inv.due_date)}</span>
               </div>
             )}
-            <table className="w-full mt-3 border-t">
-              <thead>
+            {/* Every product on its own line: name, quantity, price per unit
+                and the line total — nothing merged together. */}
+            <table className="w-full mt-3 rounded-lg overflow-hidden border">
+              <thead className="bg-muted/60">
                 <tr className="text-left text-xs uppercase text-muted-foreground">
-                  <th className="py-2">Item</th><th className="text-center">Qty</th><th className="text-right">Price</th><th className="text-right">Total</th>
+                  <th className="py-2 px-2 font-semibold">Product</th>
+                  <th className="py-2 px-1 text-center font-semibold">Qty</th>
+                  <th className="py-2 px-1 text-right font-semibold">Unit price</th>
+                  <th className="py-2 px-2 text-right font-semibold">Total</th>
                 </tr>
               </thead>
               <tbody>
                 {items.map((it) => (
                   <tr key={it.id} className="border-t">
-                    <td className="py-2">{it.product_name}</td>
-                    <td className="text-center">{it.quantity}</td>
-                    <td className="text-right">{money(it.unit_price)}</td>
-                    <td className="text-right font-medium">{money(it.total_price)}</td>
+                    <td className="py-2 px-2 font-medium">{it.product_name}</td>
+                    <td className="py-2 px-1 text-center font-semibold">{it.quantity}</td>
+                    <td className="py-2 px-1 text-right">{money(it.unit_price)}</td>
+                    <td className="py-2 px-2 text-right font-semibold">{money(it.total_price)}</td>
                   </tr>
                 ))}
                 {items.length === 0 && (
                   <tr><td colSpan={4} className="py-4 text-center text-muted-foreground">No item details on this invoice.</td></tr>
                 )}
               </tbody>
+              {items.length > 1 && (
+                <tfoot>
+                  <tr className="border-t bg-muted/40 text-xs">
+                    <td className="py-1.5 px-2 text-muted-foreground">{items.length} products</td>
+                    <td className="py-1.5 px-1 text-center font-semibold">
+                      {items.reduce((a, it) => a + (Number(it.quantity) || 0), 0)}
+                    </td>
+                    <td className="py-1.5 px-1 text-right text-muted-foreground">units</td>
+                    <td className="py-1.5 px-2"></td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
             <div className="flex justify-between pt-3 border-t font-bold">
               <span>This invoice</span><span>{money(inv.total_amount)}</span>

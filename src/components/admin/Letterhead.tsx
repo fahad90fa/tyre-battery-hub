@@ -23,7 +23,7 @@ export function Letterhead({ docTitle, docNo, date, extra }: {
             <div className="text-xl font-black tracking-tight">
               {COMPANY.name.split(" ")[0]} <span className="text-gold">{COMPANY.name.split(" ").slice(1).join(" ")}</span>
             </div>
-            <div className="text-xs font-medium">{COMPANY.fullName}</div>
+            {COMPANY.fullName !== COMPANY.name && <div className="text-xs font-medium">{COMPANY.fullName}</div>}
             <div className="text-[10px] text-muted-foreground">{COMPANY.tagline}</div>
           </div>
         </div>

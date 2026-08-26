@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { printArea } from "@/lib/print";
 import { money, shortDate, localToday } from "@/lib/format";
@@ -16,6 +16,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, BookOpen, Printer, Search, Wallet, Users, AlertTriangle } from "lucide-react";
+import { COMPANY } from "@/lib/company";
 
 export type PartyKind = "merchants" | "clients";
 const LEDGER_TABLE: Record<PartyKind, "merchant_ledger" | "client_ledger"> = {
@@ -228,8 +229,12 @@ const blankEntry = (kind: PartyKind) => ({
   reference: "", note: "", entry_date: localToday(),
 });
 
+/** One purchased/sold product inside a ledger entry, shown line by line. */
+type LedgerItem = { name: string; qty: number; unit: number; total: number };
+
 function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; onChanged: () => void }) {
   const [entries, setEntries] = useState<any[]>([]);
+  const [itemsByRef, setItemsByRef] = useState<Record<string, LedgerItem[]>>({});
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState(() => blankEntry(kind));
   const [current, setCurrent] = useState<number>(party.current_balance);
@@ -237,11 +242,52 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
   const [viewInvoice, setViewInvoice] = useState<string | null>(null);
   const [viewPurchase, setViewPurchase] = useState<string | null>(null);
 
+  // The real line items behind each bill reference, so the ledger shows
+  // Product | Qty | Unit price | Total instead of one crammed note.
+  const loadItems = async (rows: any[]) => {
+    const refs = [...new Set(rows
+      .map((x) => x.reference)
+      .filter((r) => typeof r === "string" && r.startsWith(kind === "merchants" ? "PUR" : "INV")))] as string[];
+    if (refs.length === 0) return setItemsByRef({});
+    const map: Record<string, LedgerItem[]> = {};
+    if (kind === "merchants") {
+      const { data: sp } = await supabase.from("stock_purchases")
+        .select("reference, quantity, purchase_price, products(product_name)")
+        .in("reference", refs);
+      (sp ?? []).forEach((r: any) => {
+        const qty = Number(r.quantity) || 0, unit = Number(r.purchase_price) || 0;
+        (map[r.reference] ??= []).push({
+          name: r.products?.product_name ?? "Product", qty, unit, total: qty * unit,
+        });
+      });
+    } else {
+      const { data: invs } = await supabase.from("invoices").select("id, invoice_id").in("invoice_id", refs);
+      const idToRef = Object.fromEntries((invs ?? []).map((i: any) => [i.id, i.invoice_id]));
+      const ids = Object.keys(idToRef);
+      if (ids.length > 0) {
+        const { data: items } = await supabase.from("invoice_items")
+          .select("invoice_id, product_name, quantity, unit_price, total_price")
+          .in("invoice_id", ids);
+        (items ?? []).forEach((it: any) => {
+          const ref = idToRef[it.invoice_id];
+          if (!ref) return;
+          const qty = Number(it.quantity) || 0, unit = Number(it.unit_price) || 0;
+          (map[ref] ??= []).push({
+            name: it.product_name ?? "Item", qty, unit,
+            total: Number(it.total_price) || qty * unit,
+          });
+        });
+      }
+    }
+    setItemsByRef(map);
+  };
+
   const load = async () => {
     const { data: e } = await (supabase.from(LEDGER_TABLE[kind]) as any)
       .select("*").eq(FK[kind], party.id)
       .order("entry_date", { ascending: false }).order("created_at", { ascending: false });
     setEntries(e ?? []);
+    loadItems(e ?? []);
     const { data: p } = await supabase.from(kind).select("current_balance").eq("id", party.id).maybeSingle();
     if (p) setCurrent(Number(p.current_balance));
     if (kind === "clients") {
@@ -253,6 +299,14 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
     }
   };
   useEffect(() => { load(); }, [party.id]);
+
+  // Items belong on the bill entry itself (sale / purchase) — a payment row
+  // sharing the same reference must not repeat the product list.
+  const itemsFor = (e: any): LedgerItem[] | null => {
+    if (e.entry_type !== (kind === "merchants" ? "purchase" : "sale")) return null;
+    const list = typeof e.reference === "string" ? itemsByRef[e.reference] : undefined;
+    return list && list.length > 0 ? list : null;
+  };
 
   const add = async () => {
     if (!form.amount || Number(form.amount) <= 0) return toast.error("Amount required");
@@ -398,7 +452,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
 
       <div className="print-area rounded-xl border overflow-hidden">
         <div className="hidden print:block border-b-2 border-black pb-2 mb-3">
-          <div className="text-lg font-black">MT&B HOUSE — Account Ledger</div>
+          <div className="text-lg font-black">{COMPANY.name} — Account Ledger</div>
           <div className="text-sm">
             {party.name}{party.account_no ? ` (${party.account_no})` : ""} · Balance due {money(current)}
           </div>
@@ -411,13 +465,14 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
             const hasInvoice = kind === "clients" && typeof e.reference === "string" && e.reference.startsWith("INV");
             const hasPurchase = kind === "merchants" && typeof e.reference === "string" && e.reference.startsWith("PUR");
             const clickable = hasInvoice || hasPurchase;
+            const items = itemsFor(e);
             return (
               <div key={e.id}
                    className={`px-3 py-3 sm:px-4 ${clickable ? "cursor-pointer hover:bg-muted/40" : ""}`}
                    onClick={() => { if (hasInvoice) setViewInvoice(e.reference); if (hasPurchase) setViewPurchase(e.reference); }}
                    title={clickable ? "Open full details" : undefined}>
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 space-y-1">
+                  <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ${up ? "bg-orange-500/10 text-orange-500" : "bg-green-600/10 text-green-600"}`}>
                         {shortLabel(e.entry_type)}
@@ -434,7 +489,34 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
                         : null}
                       {!e.method && !e.reference ? <span className="text-muted-foreground text-xs">No reference</span> : null}
                     </div>
-                    {e.note && <div className="text-xs text-muted-foreground">{e.note}</div>}
+                    {/* Line-by-line products on the bill: what was bought, how
+                        many, at what price — the note blob only as fallback. */}
+                    {items ? (
+                      <div className="mt-1.5 rounded-lg border overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead className="bg-muted/60">
+                            <tr className="text-left text-[10px] uppercase text-muted-foreground">
+                              <th className="py-1 px-2 font-semibold">Product</th>
+                              <th className="py-1 px-1 text-center font-semibold">Qty</th>
+                              <th className="py-1 px-1 text-right font-semibold">Unit price</th>
+                              <th className="py-1 px-2 text-right font-semibold">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {items.map((it, j) => (
+                              <tr key={j} className="border-t">
+                                <td className="py-1 px-2">{it.name}</td>
+                                <td className="py-1 px-1 text-center font-semibold">{it.qty}</td>
+                                <td className="py-1 px-1 text-right">{money(it.unit)}</td>
+                                <td className="py-1 px-2 text-right font-semibold">{money(it.total)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      e.note && <div className="text-xs text-muted-foreground">{e.note}</div>
+                    )}
                   </div>
                   <div className="text-right shrink-0">
                     <div className={`text-base font-black whitespace-nowrap ${up ? "text-orange-500" : "text-green-600"}`}>
@@ -455,23 +537,56 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
           {entries.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">No entries yet.</div>}
         </div>
 
-        {/* Print: the same rows as a compact table, which reads better on paper. */}
+        {/* Print: classic ledger-report layout — every product of a bill on
+            its own line (qty, rate, amount), then the bill total with the
+            running balance, like the old paper ledger books. */}
         <table className="hidden print:table w-full text-sm">
           <thead className="text-xs uppercase text-left border-b">
-            <tr><th className="p-2">Date</th><th className="p-2">Type</th><th className="p-2">Method</th><th className="p-2">Ref</th><th className="p-2 text-right">Amount</th><th className="p-2 text-right">Balance</th></tr>
+            <tr>
+              <th className="p-1.5">Date</th><th className="p-1.5">Detail</th>
+              <th className="p-1.5 text-center">Qty</th><th className="p-1.5 text-right">Rate</th>
+              <th className="p-1.5 text-right">Amount</th><th className="p-1.5 text-right">Balance</th>
+            </tr>
           </thead>
           <tbody>
             {entries.map((e) => {
               const up = INCREASES[kind].includes(e.entry_type);
+              const items = itemsFor(e);
+              const detail = [shortLabel(e.entry_type), e.method ? methodLabel(e.method) : null, e.reference || null]
+                .filter(Boolean).join(" · ");
+              if (!items) {
+                return (
+                  <tr key={e.id} className="border-t">
+                    <td className="p-1.5 whitespace-nowrap">{shortDate(e.entry_date ?? e.created_at)}</td>
+                    <td className="p-1.5">{detail}{e.note ? <div className="text-[10px]">{e.note}</div> : null}</td>
+                    <td className="p-1.5 text-center">—</td>
+                    <td className="p-1.5 text-right">—</td>
+                    <td className="p-1.5 text-right whitespace-nowrap">{up ? "+" : "−"}{money(e.amount)}</td>
+                    <td className="p-1.5 text-right whitespace-nowrap">{money(withRunning[e.id] ?? 0)}</td>
+                  </tr>
+                );
+              }
               return (
-                <tr key={e.id} className="border-t">
-                  <td className="p-2 whitespace-nowrap">{shortDate(e.entry_date ?? e.created_at)}</td>
-                  <td className="p-2">{shortLabel(e.entry_type)}{e.note ? <div className="text-[10px]">{e.note}</div> : null}</td>
-                  <td className="p-2">{e.method ? methodLabel(e.method) : "—"}</td>
-                  <td className="p-2 font-mono text-xs">{e.reference || "—"}</td>
-                  <td className="p-2 text-right whitespace-nowrap">{up ? "+" : "−"}{money(e.amount)}</td>
-                  <td className="p-2 text-right whitespace-nowrap">{money(withRunning[e.id] ?? 0)}</td>
-                </tr>
+                <Fragment key={e.id}>
+                  {items.map((it, j) => (
+                    <tr key={j} className="border-t">
+                      <td className="p-1.5 whitespace-nowrap">{j === 0 ? shortDate(e.entry_date ?? e.created_at) : ""}</td>
+                      <td className="p-1.5">{it.name}</td>
+                      <td className="p-1.5 text-center">{it.qty}</td>
+                      <td className="p-1.5 text-right whitespace-nowrap">{money(it.unit)}</td>
+                      <td className="p-1.5 text-right whitespace-nowrap">{money(it.total)}</td>
+                      <td className="p-1.5"></td>
+                    </tr>
+                  ))}
+                  <tr className="border-t font-bold">
+                    <td className="p-1.5"></td>
+                    <td className="p-1.5">Total — {detail}</td>
+                    <td className="p-1.5 text-center">{items.reduce((a, it) => a + it.qty, 0)}</td>
+                    <td className="p-1.5 text-right">—</td>
+                    <td className="p-1.5 text-right whitespace-nowrap">{up ? "+" : "−"}{money(e.amount)}</td>
+                    <td className="p-1.5 text-right whitespace-nowrap">{money(withRunning[e.id] ?? 0)}</td>
+                  </tr>
+                </Fragment>
               );
             })}
           </tbody>
