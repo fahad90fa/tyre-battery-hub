@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Search, Plus, Minus, Trash2, Zap, Banknote, SplitSquareHorizontal, Printer } from "lucide-react";
+import { COMPANY } from "@/lib/company";
 
 export const Route = createFileRoute("/_authenticated/admin/pos")({
   component: PosPage,
@@ -419,7 +420,7 @@ function PosPage() {
         <div className="hidden">
           <div className="print-area">
             <div className="border-b-2 border-foreground pb-2 mb-3">
-              <div className="text-lg font-black">MT&B HOUSE — Stock List</div>
+              <div className="text-lg font-black">{COMPANY.name} — Stock List</div>
               <div className="text-sm">
                 {shortDate(localToday())}
                 {q.trim() ? ` · search: “${q.trim()}”` : " · all products"}

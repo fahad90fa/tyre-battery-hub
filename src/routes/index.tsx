@@ -7,17 +7,18 @@ import { Features } from "@/components/site/Features";
 import { PremiumBanner } from "@/components/site/PremiumBanner";
 import { Deals } from "@/components/site/Deals";
 import { Testimonials } from "@/components/site/Testimonials";
+import { COMPANY } from "@/lib/company";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "MT&B HOUSE — Muzaffar Tyre And Battery House" },
+      { title: COMPANY.name },
       {
         name: "description",
         content:
           "Premium tyres, batteries, tubes and car care products from trusted brands. Reliable performance with warranty and expert support.",
       },
-      { property: "og:title", content: "MT&B HOUSE — Muzaffar Tyre And Battery House" },
+      { property: "og:title", content: COMPANY.name },
       { property: "og:description", content: "Premium tyres, batteries, tubes and car care from trusted brands." },
       { property: "og:type", content: "website" },
     ],

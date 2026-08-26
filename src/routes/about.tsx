@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { SiteShell } from "@/components/site/SiteShell";
 import { Wrench, ShieldCheck, Award, MapPin } from "lucide-react";
+import { COMPANY } from "@/lib/company";
 
 export const Route = createFileRoute("/about")({
   head: () => ({
     meta: [
-      { title: "About — MT&B HOUSE" },
-      { name: "description", content: "Muzaffar Tyre And Battery House — trusted tyre and battery specialists." },
+      { title: `About — ${COMPANY.name}` },
+      { name: "description", content: `${COMPANY.name} — trusted tyre and battery specialists.` },
     ],
   }),
   component: About,
@@ -16,9 +17,9 @@ function About() {
   return (
     <SiteShell>
       <div className="px-4 pt-8 max-w-5xl mx-auto">
-        <h1 className="text-4xl font-black">About MT&B HOUSE</h1>
+        <h1 className="text-4xl font-black">About {COMPANY.name}</h1>
         <p className="mt-4 text-lg text-muted-foreground max-w-3xl">
-          Muzaffar Tyre And Battery House has served drivers for years, offering authentic tyres,
+          {COMPANY.name} has served drivers for years, offering authentic tyres,
           batteries, tubes, and premium car care products backed by manufacturer warranty and
           honest expert advice.
         </p>

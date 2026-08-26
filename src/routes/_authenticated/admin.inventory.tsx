@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowDownToLine, ArrowUpFromLine, Package, AlertTriangle, Search, X, Printer } from "lucide-react";
+import { COMPANY } from "@/lib/company";
 
 export const Route = createFileRoute("/_authenticated/admin/inventory")({
   component: Inventory,
@@ -196,7 +197,7 @@ function Inventory() {
         <div className="hidden">
           <div className="print-area">
             <div className="border-b-2 border-foreground pb-2 mb-3">
-              <div className="text-lg font-black">MT&B HOUSE — Stock List</div>
+              <div className="text-lg font-black">{COMPANY.name} — Stock List</div>
               <div className="text-sm">
                 {shortDate(localToday())}
                 {` · all products · ${stockList.length} product${stockList.length === 1 ? "" : "s"} · ${stockListUnits} unit${stockListUnits === 1 ? "" : "s"}`}

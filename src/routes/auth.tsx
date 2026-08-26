@@ -9,10 +9,11 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Wrench, Mail, Lock, User, Sparkles, ShieldCheck, Truck, Zap } from "lucide-react";
+import { COMPANY } from "@/lib/company";
 
 
 export const Route = createFileRoute("/auth")({
-  head: () => ({ meta: [{ title: "Sign in — MT&B HOUSE" }] }),
+  head: () => ({ meta: [{ title: `Sign in — ${COMPANY.name}` }] }),
   component: AuthPage,
 });
 
@@ -143,9 +144,9 @@ function AuthPage() {
             </div>
             <div>
               <div className="font-extrabold text-lg tracking-tight">
-                MT&B <span className="text-gold">HOUSE</span>
+                Muzaffar <span className="text-gold">Tyres & Batteries</span>
               </div>
-              <div className="text-[11px] text-gold/90">Muzaffar Tyre And Battery House</div>
+              <div className="text-[11px] text-gold/90">{COMPANY.tagline}</div>
             </div>
           </Link>
         </motion.div>
@@ -190,7 +191,7 @@ function AuthPage() {
           </div>
         </div>
 
-        <div className="relative z-10 text-xs text-white/40">© MT&B HOUSE</div>
+        <div className="relative z-10 text-xs text-white/40">© {COMPANY.name}</div>
       </div>
 
       {/* RIGHT — form panel */}
@@ -214,7 +215,7 @@ function AuthPage() {
             <div className="h-10 w-10 rounded-lg bg-gold/15 grid place-items-center text-gold">
               <Wrench className="h-5 w-5" />
             </div>
-            <div className="font-extrabold">MT&B <span className="text-gold">HOUSE</span></div>
+            <div className="font-extrabold">Muzaffar <span className="text-gold">Tyres & Batteries</span></div>
           </div>
 
           <div className="bg-card border rounded-2xl shadow-xl p-8">
@@ -225,7 +226,7 @@ function AuthPage() {
                 animate={{ opacity: 1, y: 0 }}
                 className="text-2xl font-bold tracking-tight"
               >
-                {tab === "signin" ? "Welcome back 👋" : "Join MT&B HOUSE"}
+                {tab === "signin" ? "Welcome back 👋" : `Join ${COMPANY.name}`}
               </motion.h2>
               <p className="text-sm text-muted-foreground mt-1">
                 {tab === "signin" ? "Sign in to continue to your dashboard" : "Create your account in seconds"}

@@ -59,7 +59,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <Wrench className="h-5 w-5" />
         </div>
         <div className="leading-tight">
-          <div className="font-extrabold text-sm">MT&B <span className="text-gold">ADMIN</span></div>
+          <div className="font-extrabold text-sm">Muzaffar <span className="text-gold">ADMIN</span></div>
           <div className="text-[10px] text-gold">Control Center</div>
         </div>
       </Link>

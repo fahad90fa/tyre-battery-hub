@@ -9,12 +9,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { COMPANY } from "@/lib/company";
 
 export const Route = createFileRoute("/contact")({
   head: () => ({
     meta: [
-      { title: "Contact — MT&B HOUSE" },
-      { name: "description", content: "Get in touch with Muzaffar Tyre And Battery House." },
+      { title: `Contact — ${COMPANY.name}` },
+      { name: "description", content: `Get in touch with ${COMPANY.name}.` },
     ],
   }),
   component: Contact,
@@ -51,10 +52,10 @@ function Contact() {
 
         <div className="grid md:grid-cols-2 gap-4 mt-8">
           {[
-            { icon: Phone, label: "Phone", value: "+92 300 0000000" },
-            { icon: MessageCircle, label: "WhatsApp", value: "+92 300 0000000" },
-            { icon: Mail, label: "Email", value: "info@mtbhouse.com" },
-            { icon: MapPin, label: "Address", value: "Muzaffargarh, Punjab, Pakistan" },
+            { icon: Phone, label: "Phone", value: COMPANY.phone },
+            { icon: MessageCircle, label: "WhatsApp", value: COMPANY.phone },
+            { icon: Mail, label: "Email", value: COMPANY.email },
+            { icon: MapPin, label: "Address", value: COMPANY.address },
           ].map(({ icon: Icon, label, value }) => (
             <div key={label} className="flex items-start gap-4 rounded-2xl bg-card p-6 shadow-sm">
               <div className="h-11 w-11 rounded-full bg-primary/10 grid place-items-center text-primary shrink-0">
