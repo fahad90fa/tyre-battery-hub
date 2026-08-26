@@ -162,8 +162,17 @@
     max-height: none !important;
     overflow: visible !important;
     box-shadow: none !important;
+  }
+  /* Plain reports print black-on-white; a document designed in full colour
+     (the invoice) opts out by putting .print-keep on its print-area root. */
+  html.printing #print-root :not(.print-keep, .print-keep *) {
     color: #000 !important;
     background: transparent !important;
+  }
+  html.printing #print-root .print-keep,
+  html.printing #print-root .print-keep * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
   html.printing #print-root .print-area { padding: 0 !important; }
   /* Keep tables and cards from splitting awkwardly across pages. */

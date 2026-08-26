@@ -8,4 +8,5 @@ export const COMPANY = {
   // TODO: owner will supply the correct phone number — replace this one.
   phone: "0305-4548830",
   email: "muzaffartyresandbatteries@gmail.com",
+  website: "mtbhouse.store",
 };
