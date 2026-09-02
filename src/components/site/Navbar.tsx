@@ -49,7 +49,7 @@ export function Navbar() {
             </div>
             <div className="leading-tight min-w-0">
               <div className="font-extrabold tracking-tight text-foreground truncate">
-                Muzaffar <span className="text-gold">Tyres & Batteries</span>
+                MT&B <span className="text-gold">House Auto Hub</span>
               </div>
               <div className="text-[10px] text-gold tracking-wide truncate">
                 {COMPANY.tagline}
@@ -138,7 +138,7 @@ function MobileMenu({ open, onClose, dark, onToggleTheme }: { open: boolean; onC
             <Wrench className="h-5 w-5" />
           </div>
           <div className="leading-tight">
-            <div className="font-extrabold text-sm">Muzaffar <span className="text-gold">Tyres & Batteries</span></div>
+            <div className="font-extrabold text-sm">MT&B <span className="text-gold">House Auto Hub</span></div>
             <div className="text-[10px] text-gold truncate">{COMPANY.tagline}</div>
           </div>
         </div>
