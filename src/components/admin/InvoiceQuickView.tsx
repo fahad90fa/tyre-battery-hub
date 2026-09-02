@@ -81,23 +81,27 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
           </div>
         )}
         {inv && (
-          <div className="print-area print-keep bg-white text-zinc-900 rounded-2xl overflow-hidden border border-zinc-200 text-sm">
+          <div className="print-area print-keep bg-white text-zinc-900 rounded-2xl overflow-hidden border border-zinc-200 text-sm print:text-xs">
 
             {/* ============ Black & gold letterhead ============ */}
-            <div className="bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 text-white p-5 border-b-4 border-gold">
+            <div className="bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 text-white p-5 print:p-2.5 border-b-4 border-gold">
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="h-14 w-14 shrink-0 rounded-xl bg-gold/15 border-2 border-gold/60 grid place-items-center text-gold">
-                    <Wrench className="h-7 w-7" />
+                  <div className="h-14 w-14 print:h-11 print:w-11 shrink-0 rounded-xl bg-gold/15 border-2 border-gold/60 grid place-items-center text-gold">
+                    <Wrench className="h-7 w-7 print:h-5 print:w-5" />
                   </div>
-                  <div className="leading-tight min-w-0">
-                    <div className="text-2xl font-black tracking-tight">
-                      Muzaffar <span className="text-gold">Tyres & Batteries</span>
+                  {/* Logo lockup — MT&B over HOUSE AUTO HUB, full name beneath. */}
+                  <div className="leading-none min-w-0">
+                    <div className="text-3xl print:text-2xl font-black tracking-[0.08em] text-gold">MT&B</div>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <span className="h-px w-5 bg-gold/70" />
+                      <span className="text-[10px] print:text-[9px] font-bold uppercase tracking-[0.3em] text-amber-100">House Auto Hub</span>
+                      <span className="h-px w-5 bg-gold/70" />
                     </div>
-                    <div className="text-[10px] uppercase tracking-[0.25em] text-gold/90 mt-0.5">{COMPANY.tagline}</div>
+                    <div className="text-[9px] uppercase tracking-[0.16em] text-zinc-300 mt-1.5">{COMPANY.fullName}</div>
                   </div>
                 </div>
-                <div className="text-[11px] leading-relaxed shrink-0 space-y-1">
+                <div className="text-[11px] print:text-[10px] leading-relaxed print:leading-snug shrink-0 space-y-1 print:space-y-0.5">
                   {[
                     { icon: MapPin, text: COMPANY.address },
                     { icon: Phone, text: COMPANY.phone },
@@ -113,9 +117,9 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
                   ))}
                 </div>
               </div>
-              <div className="mt-4 flex gap-2 flex-wrap">
+              <div className="mt-4 print:mt-2 flex gap-2 flex-wrap">
                 {CATEGORIES.map(({ icon: Icon, label }) => (
-                  <span key={label} className="inline-flex items-center gap-1.5 rounded-lg border border-gold/40 bg-white/5 px-2 py-1 text-[9px] uppercase tracking-wider text-zinc-200">
+                  <span key={label} className="inline-flex items-center gap-1.5 rounded-lg border border-gold/40 bg-white/5 px-2 py-1 print:py-0.5 text-[9px] uppercase tracking-wider text-zinc-200">
                     <Icon className="h-3 w-3 text-gold" /> {label}
                   </span>
                 ))}
@@ -123,12 +127,12 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
             </div>
 
             {/* ============ INVOICE title + number panel ============ */}
-            <div className="flex items-start justify-between gap-4 px-5 pt-5">
+            <div className="flex items-start justify-between gap-4 px-5 pt-5 print:pt-2">
               <div>
-                <div className="text-4xl font-black tracking-tight">INVOICE</div>
+                <div className="text-4xl print:text-2xl font-black tracking-tight">INVOICE</div>
                 <div className="h-1 w-28 rounded-full bg-gradient-to-r from-gold to-amber-200 mt-1.5" />
               </div>
-              <div className="bg-zinc-950 text-white rounded-xl border border-gold/50 px-4 py-2.5 text-right">
+              <div className="bg-zinc-950 text-white rounded-xl border border-gold/50 px-4 py-2.5 print:py-1.5 text-right">
                 <div className="text-[9px] uppercase tracking-[0.2em] text-gold">Invoice #</div>
                 <div className="font-mono font-bold text-sm">{inv.invoice_id}</div>
                 <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-md bg-gold/20 text-gold px-2 py-0.5 text-[11px] font-semibold">
@@ -144,8 +148,8 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
             )}
 
             {/* ============ Bill to + payment facts ============ */}
-            <div className="grid sm:grid-cols-2 gap-3 px-5 mt-4 print-avoid-break">
-              <div className="relative rounded-xl border-2 border-zinc-200 p-4 pt-6">
+            <div className="grid sm:grid-cols-2 gap-3 px-5 mt-4 print:mt-2 print-avoid-break">
+              <div className="relative rounded-xl border-2 border-zinc-200 p-4 pt-6 print:p-3 print:pt-5">
                 <div className="absolute top-0 left-0 bg-zinc-950 text-white text-[9px] font-bold px-3 py-1 rounded-br-lg rounded-tl-[10px] uppercase tracking-widest">Bill to</div>
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-zinc-950 border-2 border-gold/60 grid place-items-center text-gold shrink-0">
@@ -161,7 +165,7 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
                   </div>
                 </div>
               </div>
-              <div className="rounded-xl border-2 border-zinc-200 p-4 grid grid-cols-2 gap-x-3 gap-y-3">
+              <div className="rounded-xl border-2 border-zinc-200 p-4 print:p-3 grid grid-cols-2 gap-x-3 gap-y-3 print:gap-y-1.5">
                 <Fact icon={CheckCircle2} label="Payment status">
                   <span className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-black uppercase text-white ${
                     cancelled ? "bg-red-600" : fullyPaid ? "bg-green-600" : paid > 0 ? "bg-amber-500" : "bg-zinc-500"}`}>
@@ -179,30 +183,30 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
             </div>
 
             {/* ============ Items ============ */}
-            <div className="px-5 mt-4">
+            <div className="px-5 mt-4 print:mt-2">
               <div className="rounded-xl overflow-hidden border border-zinc-200">
                 <table className="w-full">
                   <thead className="bg-zinc-950">
                     <tr className="text-left text-[10px] uppercase tracking-wider text-gold">
-                      <th className="py-2.5 px-3 font-bold">Item</th>
-                      <th className="py-2.5 px-2 font-bold">Description</th>
-                      <th className="py-2.5 px-2 text-center font-bold">Qty</th>
-                      <th className="py-2.5 px-2 text-right font-bold">Unit price</th>
-                      <th className="py-2.5 px-3 text-right font-bold">Total</th>
+                      <th className="py-2.5 print:py-1 px-3 font-bold">Item</th>
+                      <th className="py-2.5 print:py-1 px-2 font-bold">Description</th>
+                      <th className="py-2.5 print:py-1 px-2 text-center font-bold">Qty</th>
+                      <th className="py-2.5 print:py-1 px-2 text-right font-bold">Unit price</th>
+                      <th className="py-2.5 print:py-1 px-3 text-right font-bold">Total</th>
                     </tr>
                   </thead>
                   <tbody>
                     {items.map((it, i) => (
                       <tr key={it.id} className={`border-t border-zinc-100 ${i % 2 ? "bg-zinc-50" : "bg-white"}`}>
-                        <td className="py-2 px-3 w-12">
+                        <td className="py-2 print:py-0.5 px-3 w-12">
                           {it.product_id && images[it.product_id]
-                            ? <img src={images[it.product_id]} alt="" className="h-9 w-9 rounded-lg object-cover border border-zinc-200" />
-                            : <span className="h-9 w-9 rounded-lg bg-zinc-950 grid place-items-center text-gold"><CircleDot className="h-4 w-4" /></span>}
+                            ? <img src={images[it.product_id]} alt="" className="h-9 w-9 print:h-5 print:w-5 rounded-lg object-cover border border-zinc-200" />
+                            : <span className="h-9 w-9 print:h-5 print:w-5 rounded-lg bg-zinc-950 grid place-items-center text-gold"><CircleDot className="h-4 w-4" /></span>}
                         </td>
-                        <td className="py-2 px-2 font-semibold">{it.product_name}</td>
-                        <td className="py-2 px-2 text-center font-bold">{it.quantity}</td>
-                        <td className="py-2 px-2 text-right">{money(it.unit_price)}</td>
-                        <td className="py-2 px-3 text-right font-bold">{money(it.total_price)}</td>
+                        <td className="py-2 print:py-0.5 px-2 font-semibold">{it.product_name}</td>
+                        <td className="py-2 print:py-0.5 px-2 text-center font-bold">{it.quantity}</td>
+                        <td className="py-2 print:py-0.5 px-2 text-right">{money(it.unit_price)}</td>
+                        <td className="py-2 print:py-0.5 px-3 text-right font-bold">{money(it.total_price)}</td>
                       </tr>
                     ))}
                     {items.length === 0 && (
@@ -214,20 +218,20 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
             </div>
 
             {/* ============ Quality mark + grand total ============ */}
-            <div className="px-5 mt-4 flex items-center justify-between gap-4 flex-wrap print-avoid-break">
+            <div className="px-5 mt-4 print:mt-2 flex items-center justify-between gap-4 flex-wrap print-avoid-break">
               <div className="flex items-center gap-3">
-                <div className="h-16 w-16 rounded-full border-[3px] border-gold bg-zinc-950 grid place-items-center text-gold shrink-0">
-                  <Award className="h-8 w-8" />
+                <div className="h-16 w-16 print:h-10 print:w-10 rounded-full border-[3px] border-gold bg-zinc-950 grid place-items-center text-gold shrink-0">
+                  <Award className="h-8 w-8 print:h-5 print:w-5" />
                 </div>
                 <div className="leading-tight">
                   <div className="text-[11px] font-black uppercase tracking-widest text-amber-600">Quality</div>
                   <div className="text-[10px] uppercase tracking-widest text-zinc-500">you can trust</div>
                 </div>
               </div>
-              <div className="bg-zinc-950 text-white rounded-2xl border-2 border-gold/70 px-6 py-4 text-right min-w-[220px]">
+              <div className="bg-zinc-950 text-white rounded-2xl border-2 border-gold/70 px-6 py-4 print:py-2 text-right min-w-[220px]">
                 <div className="text-[10px] uppercase tracking-[0.25em] text-gold">Grand total</div>
-                <div className="text-3xl font-black mt-0.5">{money(inv.total_amount)}</div>
-                <div className="h-px bg-gradient-to-r from-transparent via-gold/70 to-transparent my-2" />
+                <div className="text-3xl print:text-xl font-black mt-0.5">{money(inv.total_amount)}</div>
+                <div className="h-px bg-gradient-to-r from-transparent via-gold/70 to-transparent my-2 print:my-1" />
                 {cancelled ? (
                   <span className="inline-block rounded-md bg-red-600 px-3 py-0.5 text-[11px] font-black uppercase">Cancelled</span>
                 ) : fullyPaid ? (
@@ -241,14 +245,14 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
             </div>
 
             {/* ============ Payments ============ */}
-            <div className="px-5 mt-4">
-              <div className="inline-block text-[11px] font-black uppercase tracking-[0.2em] text-amber-600 border-b-2 border-gold/60 pb-0.5 mb-2">
+            <div className="px-5 mt-4 print:mt-2">
+              <div className="inline-block text-[11px] font-black uppercase tracking-[0.2em] text-amber-600 border-b-2 border-gold/60 pb-0.5 mb-2 print:mb-1">
                 Payments
               </div>
               {payments.length === 0 ? (
                 <div className="text-xs text-zinc-400">No payments recorded yet.</div>
               ) : payments.map((p) => (
-                <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 mb-1.5">
+                <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 print:py-0.5 mb-1.5 print:mb-0.5">
                   <div className="flex items-center gap-2 text-xs text-zinc-600">
                     <Landmark className="h-3.5 w-3.5 text-zinc-500" />
                     {shortDate(p.payment_date)} — {methodLabel(p.method)}
@@ -260,7 +264,7 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
 
             {/* ============ Account summary (khaata customers) ============ */}
             {client && (
-              <div className="mx-5 mt-4 rounded-xl border border-zinc-200 p-4 space-y-1 print-avoid-break">
+              <div className="mx-5 mt-4 print:mt-2 rounded-xl border border-zinc-200 p-4 print:p-2.5 space-y-1 print:space-y-0.5 print-avoid-break">
                 <div className="text-[11px] font-black uppercase tracking-[0.2em] text-amber-600 mb-1">
                   Account summary — {client.name}
                 </div>
@@ -296,9 +300,9 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
             )}
 
             {/* ============ Thank you + print ============ */}
-            <div className="px-5 mt-4 mb-4 flex items-center justify-between gap-3 flex-wrap">
-              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 leading-tight">
-                <div className="font-serif italic font-bold text-base">Thank you!</div>
+            <div className="px-5 mt-4 print:mt-2 mb-4 print:mb-2 flex items-center justify-between gap-3 flex-wrap">
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 print:py-1 leading-tight">
+                <div className="font-serif italic font-bold text-base print:text-sm">Thank you!</div>
                 <div className="text-[11px] text-zinc-500">
                   For choosing <span className="text-amber-600 font-semibold">{COMPANY.name}</span>
                 </div>
@@ -309,8 +313,8 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
             </div>
 
             {/* ============ Footer ============ */}
-            <div className="bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border-t-4 border-gold text-center py-3 px-4">
-              <div className="font-serif italic text-gold text-sm">Driven by Quality · Trusted by You</div>
+            <div className="bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 border-t-4 border-gold text-center py-3 print:py-1 px-4">
+              <div className="font-serif italic text-gold text-sm print:text-xs">Driven by Quality · Trusted by You</div>
               <div className="text-[9px] uppercase tracking-[0.3em] text-zinc-400 mt-0.5">Your trust is our drive</div>
             </div>
           </div>

@@ -144,7 +144,7 @@ function AuthPage() {
             </div>
             <div>
               <div className="font-extrabold text-lg tracking-tight">
-                Muzaffar <span className="text-gold">Tyres & Batteries</span>
+                MT&B <span className="text-gold">House Auto Hub</span>
               </div>
               <div className="text-[11px] text-gold/90">{COMPANY.tagline}</div>
             </div>
@@ -215,7 +215,7 @@ function AuthPage() {
             <div className="h-10 w-10 rounded-lg bg-gold/15 grid place-items-center text-gold">
               <Wrench className="h-5 w-5" />
             </div>
-            <div className="font-extrabold">Muzaffar <span className="text-gold">Tyres & Batteries</span></div>
+            <div className="font-extrabold">MT&B <span className="text-gold">House Auto Hub</span></div>
           </div>
 
           <div className="bg-card border rounded-2xl shadow-xl p-8">
