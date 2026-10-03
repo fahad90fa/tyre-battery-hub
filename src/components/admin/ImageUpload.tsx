@@ -27,12 +27,16 @@ export function ImageUpload({ value, onChange, bucket = "product-images", folder
         cacheControl: "3600",
         upsert: false,
       });
-      if (error) throw error;
-      const { data, error: signErr } = await supabase.storage
-        .from(bucket)
-        .createSignedUrl(path, 60 * 60 * 24 * 365 * 10); // 10 years
-      if (signErr) throw signErr;
-      onChange(data.signedUrl);
+      if (error) {
+        // The usual cause is the bucket missing from the Supabase project.
+        throw new Error(/bucket not found/i.test(error.message)
+          ? `Storage bucket "${bucket}" does not exist in Supabase — run RUN_THIS_IN_SUPABASE.sql to create it.`
+          : error.message);
+      }
+      // The bucket is public, so a plain URL works forever (a signed URL
+      // would expire and stop rendering the product photo).
+      const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+      onChange(data.publicUrl);
       toast.success("Image uploaded");
     } catch (e: any) {
       toast.error(e.message ?? "Upload failed");
