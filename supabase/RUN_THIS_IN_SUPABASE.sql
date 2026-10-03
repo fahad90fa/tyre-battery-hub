@@ -263,7 +263,7 @@ language sql stable as $$
   -- Fixed canonical order, the same as PAYMENT_METHODS in the app (a split
   -- sale inserts all its rows in one statement, so "first used" is a tie
   -- and only a fixed rank can agree with the receipt): e.g. "Cash + Scrap".
-  select string_agg(label, ' + ' order by rank)
+  select string_agg(label, ' + ' order by rank, label)
   from (
     select public.payment_method_label(method) as label,
            min(coalesce(array_position(array['cash','jazzcash','easypaisa','bank','card','scrap','other'], lower(method)), 99)) as rank

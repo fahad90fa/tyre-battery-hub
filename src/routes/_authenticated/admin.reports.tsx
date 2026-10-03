@@ -33,9 +33,9 @@ function Reports() {
     (async () => {
       const [{ data: s }, { data: ip }, { data: lp }, { data: ex }, { data: p }] = await Promise.all([
         fetchAll((a, b) => supabase.from("customer_purchases").select("*, products(product_name)").order("id").range(a, b)),
-        fetchAll((a, b) => supabase.from("invoice_payments").select("amount, method, payment_date, invoices(client_id)").order("id").range(a, b)),
-        fetchAll((a, b) => supabase.from("client_ledger").select("amount, method, entry_date, reference").eq("entry_type", "payment").order("id").range(a, b)),
-        fetchAll((a, b) => supabase.from("expenses").select("amount, date_of_expense").order("id").range(a, b)),
+        fetchAll((a, b) => supabase.from("invoice_payments").select("id, amount, method, payment_date, invoices(client_id)").order("id").range(a, b)),
+        fetchAll((a, b) => supabase.from("client_ledger").select("id, amount, method, entry_date, reference").eq("entry_type", "payment").order("id").range(a, b)),
+        fetchAll((a, b) => supabase.from("expenses").select("id, amount, date_of_expense").order("id").range(a, b)),
         fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock").order("id").range(a, b)),
       ]);
       setSales(s ?? []); setPayments(ip ?? []); setLedgerPays(lp ?? []);
