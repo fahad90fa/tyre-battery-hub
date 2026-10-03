@@ -5,6 +5,7 @@ export const PAYMENT_METHODS = [
   { value: "bank", label: "Bank transfer" },
   { value: "card", label: "Card" },
   { value: "scrap", label: "Scrap" },
+  { value: "other", label: "Other" },
 ] as const;
 
 export const methodLabel = (v: string | null | undefined) =>

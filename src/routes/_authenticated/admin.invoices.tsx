@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Printer, EyeOff, Undo2 } from "lucide-react";
+import { Printer, EyeOff, Undo2, Search, X } from "lucide-react";
 import { Letterhead } from "@/components/admin/Letterhead";
 
 export const Route = createFileRoute("/_authenticated/admin/invoices")({
@@ -29,6 +29,7 @@ function InvoicesAdmin() {
   const [client, setClient] = useState<any>(null);
   const [tab, setTab] = useState("all");
   const [dateFilter, setDateFilter] = useState("");
+  const [q, setQ] = useState("");
   const [payForm, setPayForm] = useState({ method: "cash", amount: 0 });
   const [returnOpen, setReturnOpen] = useState(false);
   const [returnQty, setReturnQty] = useState<Record<string, number>>({});
@@ -48,6 +49,35 @@ function InvoicesAdmin() {
   useEffect(() => { load(); }, []);
 
   const paidOf = (inv: any) => (payments[inv.id] ?? []).reduce((a, p) => a + Number(p.amount), 0);
+  // How the bill was actually paid, from the payment rows — the stored text
+  // is only a snapshot from sale time and still reads "unpaid" on a bill
+  // that was settled in cash later.
+  // Same rule as the database trigger: methods in order of first use, ties
+  // broken by label, so screen and stored label never disagree.
+  const methodOf = (inv: any) => {
+    const pays = (payments[inv.id] ?? []).filter((p) => Number(p.amount) > 0);
+    if (pays.length === 0) return inv.payment_method || "unpaid";
+    const first = new Map<string, string>();
+    pays.forEach((p) => {
+      const label = methodLabel(p.method ?? "cash");
+      const at = String(p.created_at ?? "");
+      if (!first.has(label) || at < first.get(label)!) first.set(label, at);
+    });
+    return [...first.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]))
+      .map(([label]) => label).join(" + ");
+  };
+
+  // Words match at the start of a word ("cash" finds Cash, not JazzCash;
+  // "paid" is not "unpaid"); digit-only words match anywhere, so the tail
+  // of an invoice number or an amount still works.
+  const matchesInvoice = (text: string, query: string) => {
+    const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+    return query.toLowerCase().split(/\s+/).filter(Boolean).every((w) =>
+      /^[\d,.-]+$/.test(w)
+        ? words.some((t) => t.includes(w))
+        : words.some((t) => t.startsWith(w) || t.replace(/^[^a-z0-9]+/, "").startsWith(w)));
+  };
   const balanceOf = (inv: any) => Math.max(0, Number(inv.total_amount) - paidOf(inv));
   const today = localToday();
   const isCancelled = (inv: any) => inv.payment_status === "cancelled";
@@ -56,11 +86,19 @@ function InvoicesAdmin() {
   const filtered = useMemo(() => {
     let list = rows;
     if (dateFilter) list = list.filter((r) => localDateOf(r.created_at) === dateFilter);
+    // Search by invoice number, customer, amount, method or status — every
+    // typed word must match somewhere, in any order.
+    if (q.trim()) {
+      list = list.filter((r) => matchesInvoice(
+        [r.invoice_id, r.customer_name, String(r.total_amount ?? ""), money(r.total_amount),
+         methodOf(r), isCancelled(r) ? "cancelled" : isOverdue(r) ? "overdue" : r.payment_status,
+         shortDate(r.created_at)].join(" "), q));
+    }
     if (tab === "outstanding") return list.filter((r) => !isCancelled(r) && balanceOf(r) > 0);
     if (tab === "overdue") return list.filter(isOverdue);
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, payments, tab, dateFilter]);
+  }, [rows, payments, tab, dateFilter, q]);
 
   const totals = useMemo(() => ({
     outstanding: rows.reduce((a, r) => a + (isCancelled(r) ? 0 : balanceOf(r)), 0),
@@ -257,6 +295,17 @@ function InvoicesAdmin() {
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Search invoice no, customer, amount..." value={q}
+                   onChange={(e) => setQ(e.target.value)} className="pl-9 pr-8 w-64" />
+            {q && (
+              <button type="button" onClick={() => setQ("")} aria-label="Clear search"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
           <Input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="w-40" />
           {dateFilter && (
             <Button variant="ghost" size="sm" onClick={() => setDateFilter("")}>All dates</Button>
@@ -264,6 +313,11 @@ function InvoicesAdmin() {
           <div className="text-sm ml-2">
             Total receivable: <b className={totals.outstanding > 0 ? "text-orange-500" : "text-green-600"}>{money(totals.outstanding)}</b>
           </div>
+          {(q.trim() || dateFilter) && (
+            <div className="text-xs text-muted-foreground">
+              {filtered.length} invoice{filtered.length === 1 ? "" : "s"} found
+            </div>
+          )}
         </div>
       </div>
 
@@ -285,7 +339,7 @@ function InvoicesAdmin() {
                   <td className="p-3 font-semibold">{money(r.total_amount)}</td>
                   <td className="p-3 text-green-600">{money(paidOf(r))}</td>
                   <td className={`p-3 font-semibold ${bal > 0 ? "text-orange-500" : "text-muted-foreground"}`}>{bal > 0 ? money(bal) : "—"}</td>
-                  <td className="p-3 text-muted-foreground">{r.payment_method}</td>
+                  <td className="p-3 text-muted-foreground">{methodOf(r)}</td>
                   <td className="p-3">
                     <span className={cancelled ? "text-destructive font-semibold" : r.payment_status === "paid" ? "text-green-600" : overdue ? "text-destructive font-semibold" : "text-orange-500"}>
                       {cancelled ? "cancelled" : overdue ? "overdue" : r.payment_status}
@@ -296,7 +350,11 @@ function InvoicesAdmin() {
                 </tr>
               );
             })}
-            {filtered.length === 0 && <tr><td colSpan={9} className="p-10 text-center text-muted-foreground">No invoices here.</td></tr>}
+            {filtered.length === 0 && (
+              <tr><td colSpan={9} className="p-10 text-center text-muted-foreground">
+                {q.trim() ? `No invoices match "${q.trim()}".` : "No invoices here."}
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>
