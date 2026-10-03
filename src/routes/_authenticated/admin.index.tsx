@@ -13,6 +13,7 @@ import {
   Package, DollarSign, TrendingUp, AlertTriangle, LayoutTemplate,
   Store, UserCircle, Briefcase, Layers,
 } from "lucide-react";
+import { fetchAll } from "@/lib/fetchAll";
 
 export const Route = createFileRoute("/_authenticated/admin/")({
   component: Dashboard,
@@ -58,12 +59,12 @@ function Dashboard() {
         { count: merCount },
         { count: cliCount },
       ] = await Promise.all([
-        supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price, selling_price, category_id"),
-        supabase.from("customer_purchases").select("total_price, purchase_date, product_id, quantity_purchased"),
-        supabase.from("expenses").select("amount, date_of_expense"),
+        fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price, selling_price, category_id").order("id").range(a, b)),
+        fetchAll((a, b) => supabase.from("customer_purchases").select("total_price, purchase_date, product_id, quantity_purchased").order("id").range(a, b)),
+        fetchAll((a, b) => supabase.from("expenses").select("amount, date_of_expense").order("id").range(a, b)),
         supabase.from("categories").select("id, name"),
-        supabase.from("invoice_payments").select("amount, method, payment_date, invoices(client_id)"),
-        supabase.from("client_ledger").select("amount, method, entry_date, reference").eq("entry_type", "payment"),
+        fetchAll((a, b) => supabase.from("invoice_payments").select("amount, method, payment_date, invoices(client_id)").order("id").range(a, b)),
+        fetchAll((a, b) => supabase.from("client_ledger").select("amount, method, entry_date, reference").eq("entry_type", "payment").order("id").range(a, b)),
         supabase.from("templates").select("*", { count: "exact", head: true }),
         supabase.from("employees").select("*", { count: "exact", head: true }),
         supabase.from("merchants").select("*", { count: "exact", head: true }),

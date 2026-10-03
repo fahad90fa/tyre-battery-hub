@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
+import { fetchAll } from "@/lib/fetchAll";
 
 export const Route = createFileRoute("/_authenticated/admin/customers")({
   component: CustomersAdmin,
@@ -39,8 +40,8 @@ function CustomersAdmin() {
 
   const load = async () => {
     const [{ data: r }, { data: p }, { data: c }] = await Promise.all([
-      supabase.from("customer_purchases").select("*, products(product_name)").order("created_at", { ascending: false }),
-      supabase.from("products").select("id, product_name, selling_price, purchase_price, quantity_in_stock"),
+      fetchAll((a, b) => supabase.from("customer_purchases").select("*, products(product_name)").order("created_at", { ascending: false }).order("id").range(a, b)),
+      fetchAll((a, b) => supabase.from("products").select("id, product_name, selling_price, purchase_price, quantity_in_stock").order("id").range(a, b)),
       supabase.from("clients").select("id, name, account_no, current_balance").order("name"),
     ]);
     setRows(r ?? []); setProducts(p ?? []); setClients(c ?? []);

@@ -260,14 +260,16 @@ $$;
 create or replace function public.invoice_methods_summary(inv_id uuid) returns text
 language sql stable as $$
   -- Methods in the order they were first used, e.g. "Cash + Bank transfer".
-  -- Ordered by first use, then label — a split payment inserts its rows
-  -- in one statement (identical created_at), so the tie needs a rule.
-  select string_agg(label, ' + ' order by first_at, label)
+  -- Fixed canonical order, the same as PAYMENT_METHODS in the app (a split
+  -- sale inserts all its rows in one statement, so "first used" is a tie
+  -- and only a fixed rank can agree with the receipt): e.g. "Cash + Scrap".
+  select string_agg(label, ' + ' order by rank)
   from (
-    select public.payment_method_label(method) as label, min(created_at) as first_at
+    select public.payment_method_label(method) as label,
+           min(coalesce(array_position(array['cash','jazzcash','easypaisa','bank','card','scrap','other'], lower(method)), 99)) as rank
     from public.invoice_payments
     where invoice_id = inv_id and amount > 0
-    group by public.payment_method_label(method)
+    group by 1
   ) m
 $$;
 

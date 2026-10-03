@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Plus, Trash2, Printer, FileText, Search } from "lucide-react";
+import { fetchAll } from "@/lib/fetchAll";
 
 export const Route = createFileRoute("/_authenticated/admin/quotations")({
   component: QuotationsAdmin,
@@ -45,7 +46,7 @@ function QuotationsAdmin() {
   const load = async () => {
     const [{ data: r }, { data: p }, { data: c }] = await Promise.all([
       supabase.from("quotations").select("*").order("created_at", { ascending: false }),
-      supabase.from("products").select("id, product_name, selling_price, purchase_price, quantity_in_stock"),
+      fetchAll((a, b) => supabase.from("products").select("id, product_name, selling_price, purchase_price, quantity_in_stock").order("id").range(a, b)),
       supabase.from("clients").select("id, name, account_no").order("name"),
     ]);
     setRows(r ?? []); setProducts(p ?? []); setClients(c ?? []);

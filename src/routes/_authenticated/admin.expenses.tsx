@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Trash2, CalendarDays } from "lucide-react";
+import { fetchAll } from "@/lib/fetchAll";
 
 export const Route = createFileRoute("/_authenticated/admin/expenses")({
   component: ExpensesAdmin,
@@ -19,8 +20,8 @@ function ExpensesAdmin() {
   const [form, setForm] = useState({ expense_type: "", amount: 0, notes: "", date: localToday() });
 
   const load = async () => {
-    const { data } = await supabase.from("expenses").select("*")
-      .order("date_of_expense", { ascending: false }).order("created_at", { ascending: false });
+    const { data } = await fetchAll((a, b) => supabase.from("expenses").select("*")
+      .order("date_of_expense", { ascending: false }).order("created_at", { ascending: false }).order("id").range(a, b));
     setRows(data ?? []);
   };
   useEffect(() => { load(); }, []);
