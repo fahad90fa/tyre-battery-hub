@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Plus, Search, PackageCheck, PackageOpen, Trash2, Undo2, Phone, AlertTriangle } from "lucide-react";
+import { fetchAll } from "@/lib/fetchAll";
 
 export const Route = createFileRoute("/_authenticated/admin/amanat")({
   component: AmanatPage,
@@ -34,7 +35,7 @@ function AmanatPage() {
   const load = async () => {
     const [{ data: a }, { data: p }, { data: c }] = await Promise.all([
       supabase.from("amanat_items").select("*").order("given_date", { ascending: false }).order("created_at", { ascending: false }),
-      supabase.from("products").select("id, product_name, quantity_in_stock").order("product_name"),
+      fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock").order("product_name").order("id").range(a, b)),
       supabase.from("clients").select("id, name, account_no, phone").order("name"),
     ]);
     setRows(a ?? []); setProducts(p ?? []); setClients(c ?? []);

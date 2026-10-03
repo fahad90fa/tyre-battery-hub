@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { ImageUpload } from "@/components/admin/ImageUpload";
+import { fetchAll } from "@/lib/fetchAll";
 
 export const Route = createFileRoute("/_authenticated/admin/products")({
   component: ProductsAdmin,
@@ -32,7 +33,7 @@ function ProductsAdmin() {
 
   const load = async () => {
     const [{ data: p }, { data: c }, { data: s }, { data: b }] = await Promise.all([
-      supabase.from("products").select("*, categories(name), brands(name)").order("created_at", { ascending: false }),
+      fetchAll((a, b) => supabase.from("products").select("*, categories(name), brands(name)").order("created_at", { ascending: false }).order("id").range(a, b)),
       supabase.from("categories").select("id, name"),
       supabase.from("subcategories").select("id, name, category_id"),
       supabase.from("brands").select("id, name"),

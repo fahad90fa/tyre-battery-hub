@@ -10,6 +10,7 @@ import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { applyPct, inStockFirst, sumMoney } from "@/lib/pricing";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
+import { fetchAll } from "@/lib/fetchAll";
 
 export const Route = createFileRoute("/_authenticated/admin/stock")({
   component: StockAdmin,
@@ -37,8 +38,8 @@ function StockAdmin() {
 
   const load = async () => {
     const [{ data: r, error: rErr }, { data: p }, { data: m }] = await Promise.all([
-      supabase.from("stock_purchases").select("*, products(product_name)").order("date", { ascending: false }).order("created_at", { ascending: false }),
-      supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price, selling_price"),
+      fetchAll((a, b) => supabase.from("stock_purchases").select("*, products(product_name)").order("date", { ascending: false }).order("created_at", { ascending: false }).order("id").range(a, b)),
+      fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price, selling_price").order("id").range(a, b)),
       supabase.from("merchants").select("id, name, account_no").order("name"),
     ]);
     // An empty list used to look identical to a failed query. Say which it is.

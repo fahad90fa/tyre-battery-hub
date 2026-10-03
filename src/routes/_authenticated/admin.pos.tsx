@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Search, Plus, Minus, Trash2, Zap, Banknote, SplitSquareHorizontal, Printer } from "lucide-react";
 import { COMPANY } from "@/lib/company";
+import { fetchAll } from "@/lib/fetchAll";
 
 export const Route = createFileRoute("/_authenticated/admin/pos")({
   component: PosPage,
@@ -45,7 +46,7 @@ function PosPage() {
 
   const load = async () => {
     const [{ data: p }, { data: c }] = await Promise.all([
-      supabase.from("products").select("id, product_name, selling_price, purchase_price, quantity_in_stock").order("product_name"),
+      fetchAll((a, b) => supabase.from("products").select("id, product_name, selling_price, purchase_price, quantity_in_stock").order("product_name").order("id").range(a, b)),
       supabase.from("clients").select("id, name, account_no, current_balance").order("name"),
     ]);
     setProducts(p ?? []); setClients(c ?? []);

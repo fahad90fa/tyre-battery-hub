@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowDownToLine, ArrowUpFromLine, Package, AlertTriangle, Search, X, Printer } from "lucide-react";
 import { COMPANY } from "@/lib/company";
+import { fetchAll } from "@/lib/fetchAll";
 
 export const Route = createFileRoute("/_authenticated/admin/inventory")({
   component: Inventory,
@@ -48,9 +49,9 @@ function Inventory() {
   useEffect(() => {
     (async () => {
       const [{ data: p }, { data: sin }, { data: sout }] = await Promise.all([
-        supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price, selling_price").order("product_name"),
-        supabase.from("stock_purchases").select("*, products(product_name), merchants(name)").order("date", { ascending: false }).order("created_at", { ascending: false }),
-        supabase.from("invoice_items").select("*, invoices(invoice_id, customer_name, created_at)").order("id", { ascending: false }),
+        fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price, selling_price").order("product_name").order("id").range(a, b)),
+        fetchAll((a, b) => supabase.from("stock_purchases").select("*, products(product_name), merchants(name)").order("date", { ascending: false }).order("created_at", { ascending: false }).order("id").range(a, b)),
+        fetchAll((a, b) => supabase.from("invoice_items").select("*, invoices(invoice_id, customer_name, created_at)").order("id", { ascending: false }).order("id").range(a, b)),
       ]);
       setProducts(p ?? []); setStockIn(sin ?? []); setStockOut(sout ?? []);
     })();

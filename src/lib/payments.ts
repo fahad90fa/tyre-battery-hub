@@ -11,9 +11,12 @@ export const PAYMENT_METHODS = [
 export const methodLabel = (v: string | null | undefined) =>
   PAYMENT_METHODS.find((m) => m.value === v)?.label ?? (v || "—");
 
-/** Summarise split payments as e.g. "JazzCash + Cash" for the invoice row. */
+/** Summarise split payments as e.g. "Cash + JazzCash" for the invoice row —
+ *  always in PAYMENT_METHODS order, the same canonical order the database
+ *  trigger writes, so receipt, list and stored label never disagree. */
 export const summarizeMethods = (methods: string[]) => {
-  const uniq = [...new Set(methods)];
+  const rank = (v: string) => { const i = PAYMENT_METHODS.findIndex((m) => m.value === v); return i < 0 ? 99 : i; };
+  const uniq = [...new Set(methods)].sort((a, b) => rank(a) - rank(b));
   if (uniq.length === 0) return "unpaid";
   return uniq.map(methodLabel).join(" + ");
 };

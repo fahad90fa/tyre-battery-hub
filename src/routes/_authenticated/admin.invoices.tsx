@@ -4,7 +4,7 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { printArea } from "@/lib/print";
 import { money, shortDate, localToday, localDateOf } from "@/lib/format";
-import { PAYMENT_METHODS, methodLabel, paymentStatus } from "@/lib/payments";
+import { PAYMENT_METHODS, methodLabel, paymentStatus, summarizeMethods } from "@/lib/payments";
 import { sumMoney, toPaisa } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Printer, EyeOff, Undo2, Search, X } from "lucide-react";
 import { Letterhead } from "@/components/admin/Letterhead";
+import { fetchAll } from "@/lib/fetchAll";
 
 export const Route = createFileRoute("/_authenticated/admin/invoices")({
   component: InvoicesAdmin,
@@ -38,8 +39,8 @@ function InvoicesAdmin() {
 
   const load = async () => {
     const [{ data: inv }, { data: pays }] = await Promise.all([
-      supabase.from("invoices").select("*").order("created_at", { ascending: false }),
-      supabase.from("invoice_payments").select("*").order("payment_date"),
+      fetchAll((a, b) => supabase.from("invoices").select("*").order("created_at", { ascending: false }).order("id").range(a, b)),
+      fetchAll((a, b) => supabase.from("invoice_payments").select("*").order("payment_date").order("id").range(a, b)),
     ]);
     setRows(inv ?? []);
     const byInv: Record<string, any[]> = {};
@@ -52,20 +53,11 @@ function InvoicesAdmin() {
   // How the bill was actually paid, from the payment rows — the stored text
   // is only a snapshot from sale time and still reads "unpaid" on a bill
   // that was settled in cash later.
-  // Same rule as the database trigger: methods in order of first use, ties
-  // broken by label, so screen and stored label never disagree.
+  // summarizeMethods uses the same canonical order as the database trigger,
+  // so screen and stored label never disagree.
   const methodOf = (inv: any) => {
     const pays = (payments[inv.id] ?? []).filter((p) => Number(p.amount) > 0);
-    if (pays.length === 0) return inv.payment_method || "unpaid";
-    const first = new Map<string, string>();
-    pays.forEach((p) => {
-      const label = methodLabel(p.method ?? "cash");
-      const at = String(p.created_at ?? "");
-      if (!first.has(label) || at < first.get(label)!) first.set(label, at);
-    });
-    return [...first.entries()]
-      .sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]))
-      .map(([label]) => label).join(" + ");
+    return pays.length > 0 ? summarizeMethods(pays.map((p) => p.method ?? "cash")) : (inv.payment_method || "unpaid");
   };
 
   // Words match at the start of a word ("cash" finds Cash, not JazzCash;
@@ -114,7 +106,7 @@ function InvoicesAdmin() {
     setPayForm({ method: "cash", amount: Math.max(0, Number(inv.total_amount) - paidOf(inv)) });
     const req = ++viewReq.current;
     const [{ data }, clientRes] = await Promise.all([
-      supabase.from("invoice_items").select("*").eq("invoice_id", inv.id),
+      fetchAll((a, b) => supabase.from("invoice_items").select("*").eq("invoice_id", inv.id).order("id").range(a, b)),
       inv.client_id
         ? supabase.from("clients").select("id, name, account_no, current_balance").eq("id", inv.client_id).maybeSingle()
         : Promise.resolve({ data: null }),

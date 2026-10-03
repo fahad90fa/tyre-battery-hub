@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { HandCoins, Store, TrendingDown, TrendingUp, Wallet, CalendarDays, Banknote, CreditCard, RefreshCw } from "lucide-react";
+import { fetchAll } from "@/lib/fetchAll";
 
 export const Route = createFileRoute("/_authenticated/admin/recoveries")({
   component: Recoveries,
@@ -49,11 +50,11 @@ function Recoveries() {
   const load = async () => {
     setLoading(true);
     const [ipR, lpR, mpR, exR, slR, clR] = await Promise.all([
-      supabase.from("invoice_payments").select("*, invoices(invoice_id, customer_name, created_at, client_id)").order("payment_date", { ascending: false }),
-      supabase.from("client_ledger").select("*, clients(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
-      supabase.from("merchant_ledger").select("*, merchants(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }),
-      supabase.from("expenses").select("*").order("date_of_expense", { ascending: false }),
-      supabase.from("invoices").select("id, invoice_id, customer_name, total_amount, created_at, client_id, payment_status").order("created_at", { ascending: false }),
+      fetchAll((a, b) => supabase.from("invoice_payments").select("*, invoices(invoice_id, customer_name, created_at, client_id)").order("payment_date", { ascending: false }).order("id").range(a, b)),
+      fetchAll((a, b) => supabase.from("client_ledger").select("*, clients(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }).order("id").range(a, b)),
+      fetchAll((a, b) => supabase.from("merchant_ledger").select("*, merchants(name, account_no)").eq("entry_type", "payment").order("entry_date", { ascending: false }).order("id").range(a, b)),
+      fetchAll((a, b) => supabase.from("expenses").select("*").order("date_of_expense", { ascending: false }).order("id").range(a, b)),
+      fetchAll((a, b) => supabase.from("invoices").select("id, invoice_id, customer_name, total_amount, created_at, client_id, payment_status").order("created_at", { ascending: false }).order("id").range(a, b)),
       supabase.from("clients").select("id, name, account_no, current_balance").order("name"),
     ]);
     // Never show an empty page when a query actually failed.

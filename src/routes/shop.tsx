@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search } from "lucide-react";
 import { COMPANY } from "@/lib/company";
+import { fetchAll } from "@/lib/fetchAll";
 
 export const Route = createFileRoute("/shop")({
   head: () => ({
@@ -39,7 +40,7 @@ function Shop() {
   useEffect(() => {
     (async () => {
       const [{ data: p }, { data: c }, { data: b }] = await Promise.all([
-        supabase.from("products").select("*").order("created_at", { ascending: false }),
+        fetchAll((a, b) => supabase.from("products").select("*").order("created_at", { ascending: false }).order("id").range(a, b)),
         supabase.from("categories").select("id, name").order("display_order"),
         supabase.from("brands").select("id, name").order("name"),
       ]);
