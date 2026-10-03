@@ -181,5 +181,5 @@
   html.printing #print-root thead { display: table-header-group; }
   html.printing #print-root .print-avoid-break { page-break-inside: avoid; }
   /* Elements explicitly marked as screen-only. */
-  html.printing #print-root .print\\:hidden, html.printing .no-print { display: none !important; }
+  html.printing #print-root .print\:hidden, html.printing .no-print { display: none !important; }
 }
