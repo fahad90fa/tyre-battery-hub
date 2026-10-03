@@ -260,7 +260,9 @@ $$;
 create or replace function public.invoice_methods_summary(inv_id uuid) returns text
 language sql stable as $$
   -- Methods in the order they were first used, e.g. "Cash + Bank transfer".
-  select string_agg(label, ' + ' order by first_at)
+  -- Ordered by first use, then label — a split payment inserts its rows
+  -- in one statement (identical created_at), so the tie needs a rule.
+  select string_agg(label, ' + ' order by first_at, label)
   from (
     select public.payment_method_label(method) as label, min(created_at) as first_at
     from public.invoice_payments

@@ -4,8 +4,7 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { printArea } from "@/lib/print";
 import { money, shortDate, localToday, localDateOf } from "@/lib/format";
-import { PAYMENT_METHODS, methodLabel, paymentStatus, summarizeMethods } from "@/lib/payments";
-import { matchesQuery } from "@/lib/search";
+import { PAYMENT_METHODS, methodLabel, paymentStatus } from "@/lib/payments";
 import { sumMoney, toPaisa } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,9 +52,31 @@ function InvoicesAdmin() {
   // How the bill was actually paid, from the payment rows — the stored text
   // is only a snapshot from sale time and still reads "unpaid" on a bill
   // that was settled in cash later.
+  // Same rule as the database trigger: methods in order of first use, ties
+  // broken by label, so screen and stored label never disagree.
   const methodOf = (inv: any) => {
     const pays = (payments[inv.id] ?? []).filter((p) => Number(p.amount) > 0);
-    return pays.length > 0 ? summarizeMethods(pays.map((p) => p.method ?? "cash")) : (inv.payment_method || "unpaid");
+    if (pays.length === 0) return inv.payment_method || "unpaid";
+    const first = new Map<string, string>();
+    pays.forEach((p) => {
+      const label = methodLabel(p.method ?? "cash");
+      const at = String(p.created_at ?? "");
+      if (!first.has(label) || at < first.get(label)!) first.set(label, at);
+    });
+    return [...first.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]))
+      .map(([label]) => label).join(" + ");
+  };
+
+  // Words match at the start of a word ("cash" finds Cash, not JazzCash;
+  // "paid" is not "unpaid"); digit-only words match anywhere, so the tail
+  // of an invoice number or an amount still works.
+  const matchesInvoice = (text: string, query: string) => {
+    const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+    return query.toLowerCase().split(/\s+/).filter(Boolean).every((w) =>
+      /^[\d,.-]+$/.test(w)
+        ? words.some((t) => t.includes(w))
+        : words.some((t) => t.startsWith(w) || t.replace(/^[^a-z0-9]+/, "").startsWith(w)));
   };
   const balanceOf = (inv: any) => Math.max(0, Number(inv.total_amount) - paidOf(inv));
   const today = localToday();
@@ -68,7 +89,7 @@ function InvoicesAdmin() {
     // Search by invoice number, customer, amount, method or status — every
     // typed word must match somewhere, in any order.
     if (q.trim()) {
-      list = list.filter((r) => matchesQuery(
+      list = list.filter((r) => matchesInvoice(
         [r.invoice_id, r.customer_name, String(r.total_amount ?? ""), money(r.total_amount),
          methodOf(r), isCancelled(r) ? "cancelled" : isOverdue(r) ? "overdue" : r.payment_status,
          shortDate(r.created_at)].join(" "), q));
