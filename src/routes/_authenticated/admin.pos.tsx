@@ -57,10 +57,13 @@ function PosPage() {
   // "Bandalayar 12 Evergreen" and "Evergreen Bandalayar 12" both match.
   // Products with stock come first (alphabetical); out-of-stock ones sink
   // to the very bottom so the sellable items are always in front.
-  const matches = useMemo(
-    () => inStockFirst(q.trim() ? products.filter((p) => matchesQuery(p.product_name, q)) : products),
-    [products, q],
-  );
+  // Browsing shows only what can be sold right now; a typed search still
+  // finds out-of-stock products (sorted last) so nothing is ever lost.
+  const [showOutOfStock, setShowOutOfStock] = useState(false);
+  const matches = useMemo(() => {
+    if (q.trim()) return inStockFirst(products.filter((p) => matchesQuery(p.product_name, q)));
+    return inStockFirst(showOutOfStock ? products : products.filter((p) => (Number(p.quantity_in_stock) || 0) > 0));
+  }, [products, q, showOutOfStock]);
   const filtered = useMemo(() => matches.slice(0, q.trim() ? 60 : 30), [matches, q]);
 
   // Render the print-only stock list, then hand it to the browser.
@@ -217,6 +220,10 @@ function PosPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input autoFocus placeholder="Search product... (any word order)" value={q} onChange={(e) => setQ(e.target.value)} className="pl-9 h-11" />
             </div>
+            <Button variant={showOutOfStock ? "secondary" : "outline"} className="h-11" onClick={() => setShowOutOfStock((v) => !v)}
+                    title="Browse out-of-stock products too (a search always finds them)">
+              {showOutOfStock ? "Hide out of stock" : "Show out of stock"}
+            </Button>
             <Button variant="outline" className="h-11" onClick={() => setStockPrint(true)}
                     title="Print the stock list currently matching the search">
               <Printer className="h-4 w-4 mr-2" /> Print stock list

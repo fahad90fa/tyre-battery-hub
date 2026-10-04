@@ -1,5 +1,5 @@
 import { Wrench } from "lucide-react";
-import { COMPANY } from "@/lib/company";
+import { useCompany } from "@/lib/company";
 import { shortDate } from "@/lib/format";
 
 /**
@@ -12,6 +12,7 @@ export function Letterhead({ docTitle, docNo, date, extra }: {
   date: string | Date | null | undefined;
   extra?: React.ReactNode;
 }) {
+  const COMPANY = useCompany();
   return (
     <div className="border-b-2 border-foreground/80 pb-3 mb-4">
       <div className="flex items-start justify-between gap-4">
@@ -29,6 +30,7 @@ export function Letterhead({ docTitle, docNo, date, extra }: {
         </div>
         <div className="text-right text-[11px] text-muted-foreground leading-relaxed shrink-0">
           <div>{COMPANY.address}</div>
+          {COMPANY.branch && <div>{COMPANY.branch} branch</div>}
           <div>{COMPANY.phone}</div>
           <div>{COMPANY.email}</div>
         </div>

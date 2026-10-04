@@ -4,7 +4,7 @@ import { printArea } from "@/lib/print";
 import { money, shortDate } from "@/lib/format";
 import { methodLabel } from "@/lib/payments";
 import { toPaisa } from "@/lib/pricing";
-import { COMPANY } from "@/lib/company";
+import { useCompany } from "@/lib/company";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +35,7 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
   const [client, setClient] = useState<any>(null);
   const [images, setImages] = useState<Record<string, string>>({});
   const [notFound, setNotFound] = useState(false);
+  const COMPANY = useCompany();
 
   useEffect(() => {
     if (!invoiceRef) { setInv(null); setItems([]); setPayments([]); setClient(null); setImages({}); setNotFound(false); return; }
@@ -103,7 +104,7 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
                 </div>
                 <div className="text-[11px] print:text-[10px] leading-relaxed print:leading-snug shrink-0 space-y-1 print:space-y-0.5">
                   {[
-                    { icon: MapPin, text: COMPANY.address },
+                    { icon: MapPin, text: COMPANY.branch ? `${COMPANY.address} · ${COMPANY.branch} branch` : COMPANY.address },
                     { icon: Phone, text: COMPANY.phone },
                     { icon: Mail, text: COMPANY.email },
                     { icon: Globe, text: COMPANY.website },
@@ -243,6 +244,22 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
                 )}
               </div>
             </div>
+
+            {/* ============ Bank transfer details (when set in Business Settings) ============ */}
+            {COMPANY.bankAccountNumber && (
+              <div className="mx-5 mt-4 print:mt-2 rounded-xl border-2 border-gold/50 bg-amber-50 p-3 print:p-2 print-avoid-break">
+                <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-amber-700 mb-1">
+                  <Landmark className="h-3 w-3" /> Bank transfer details
+                </div>
+                <div className="grid sm:grid-cols-2 gap-x-6 gap-y-0.5 text-xs">
+                  {COMPANY.bankName && <div className="flex justify-between gap-3"><span className="text-zinc-500">Bank</span><b>{COMPANY.bankName}</b></div>}
+                  {COMPANY.bankAccountTitle && <div className="flex justify-between gap-3"><span className="text-zinc-500">Account title</span><b>{COMPANY.bankAccountTitle}</b></div>}
+                  <div className="flex justify-between gap-3"><span className="text-zinc-500">Account number</span><b className="font-mono">{COMPANY.bankAccountNumber}</b></div>
+                  {COMPANY.bankIban && <div className="flex justify-between gap-3"><span className="text-zinc-500">IBAN</span><b className="font-mono">{COMPANY.bankIban}</b></div>}
+                  {COMPANY.branch && <div className="flex justify-between gap-3"><span className="text-zinc-500">Branch</span><b>{COMPANY.branch}</b></div>}
+                </div>
+              </div>
+            )}
 
             {/* ============ Payments ============ */}
             <div className="px-5 mt-4 print:mt-2">

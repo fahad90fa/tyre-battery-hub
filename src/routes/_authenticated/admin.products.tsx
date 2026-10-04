@@ -2,8 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money } from "@/lib/format";
+import { money, localDateOf } from "@/lib/format";
 import { inStockFirst } from "@/lib/pricing";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +21,9 @@ export const Route = createFileRoute("/_authenticated/admin/products")({
 });
 
 const empty = { product_name: "", description: "", image_url: "", category_id: "", subcategory_id: "", brand_id: "",
-  quantity_in_stock: 0, purchase_price: 0, selling_price: 0 };
+  quantity_in_stock: 0, purchase_price: 0, selling_price: 0,
+  // Website visibility: featured products and "deal of the day" items.
+  is_featured: false, is_deal: false, deal_end_date: "" };
 
 function ProductsAdmin() {
   const [rows, setRows] = useState<any[]>([]);
@@ -53,6 +56,11 @@ function ProductsAdmin() {
       quantity_in_stock: Number(form.quantity_in_stock),
       purchase_price: Number(form.purchase_price),
       selling_price: Number(form.selling_price),
+      is_featured: !!form.is_featured,
+      is_deal: !!form.is_deal,
+      // A deal runs through the end of the chosen day.
+      deal_end_date: form.is_deal && form.deal_end_date
+        ? new Date(`${String(form.deal_end_date).slice(0, 10)}T23:59:59`).toISOString() : null,
     };
     const { error } = editing
       ? await supabase.from("products").update(payload).eq("id", editing)
@@ -116,6 +124,22 @@ function ProductsAdmin() {
               <Field label="Purchase price"><Input type="number" value={form.purchase_price} onChange={(e) => setForm({ ...form, purchase_price: e.target.value })} /></Field>
               <Field label="Selling price"><Input type="number" value={form.selling_price} onChange={(e) => setForm({ ...form, selling_price: e.target.value })} /></Field>
               <Field label="Stock qty"><Input type="number" value={form.quantity_in_stock} onChange={(e) => setForm({ ...form, quantity_in_stock: e.target.value })} /></Field>
+              <Field label="Show on website" full>
+                <div className="flex flex-wrap gap-5 text-sm">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox checked={!!form.is_featured} onCheckedChange={(v) => setForm({ ...form, is_featured: v === true })} /> Featured product
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox checked={!!form.is_deal} onCheckedChange={(v) => setForm({ ...form, is_deal: v === true })} /> Deal of the day
+                  </label>
+                </div>
+              </Field>
+              {form.is_deal && (
+                <Field label="Deal ends on">
+                  <Input type="date" value={form.deal_end_date ? localDateOf(form.deal_end_date) || String(form.deal_end_date).slice(0, 10) : ""}
+                         onChange={(e) => setForm({ ...form, deal_end_date: e.target.value })} />
+                </Field>
+              )}
               <Field label="Description" full><Textarea value={form.description ?? ""} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
             </div>
             <Button className="w-full mt-2" onClick={save}>Save</Button>
@@ -142,6 +166,8 @@ function ProductsAdmin() {
                       <div className="h-10 w-10 rounded bg-muted border" />
                     )}
                     <span>{r.product_name}</span>
+                    {r.is_deal && <span className="ml-2 text-[10px] rounded-full bg-gold/15 text-amber-700 px-2 py-0.5 font-semibold">Deal</span>}
+                    {r.is_featured && <span className="ml-1 text-[10px] rounded-full bg-primary/10 text-primary px-2 py-0.5 font-semibold">Featured</span>}
                   </div>
                 </td>
                 <td className="p-3 text-muted-foreground">{r.categories?.name ?? "—"}</td>
