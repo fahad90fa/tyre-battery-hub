@@ -37,6 +37,9 @@ export function Deals() {
       const { data } = await supabase.from("products")
         .select("id, product_name, image_url, selling_price, quantity_in_stock, deal_end_date")
         .eq("is_deal", true)
+        // Expired deals stay ticked until the admin unticks them; keep them
+        // out of the query so they can't crowd live deals out of the limit.
+        .or(`deal_end_date.is.null,deal_end_date.gt.${new Date().toISOString()}`)
         .order("deal_end_date", { ascending: true, nullsFirst: false })
         .limit(10);
       const now = Date.now();

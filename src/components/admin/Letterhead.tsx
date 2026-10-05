@@ -35,6 +35,17 @@ export function Letterhead({ docTitle, docNo, date, extra }: {
           <div>{COMPANY.email}</div>
         </div>
       </div>
+      {/* Payment accounts, so a customer can pay by transfer straight off the slip. */}
+      {(COMPANY.jazzcashNumber || COMPANY.bankAccountNumber) && (
+        <div className="mt-2 text-[11px] flex flex-wrap gap-x-4 gap-y-0.5">
+          {COMPANY.jazzcashNumber && (
+            <span><b>JazzCash</b> <span className="font-mono">{COMPANY.jazzcashNumber}</span>{COMPANY.jazzcashTitle ? ` (${COMPANY.jazzcashTitle})` : ""}</span>
+          )}
+          {COMPANY.bankAccountNumber && (
+            <span><b>{COMPANY.bankName || "Bank"}</b> <span className="font-mono">{COMPANY.bankAccountNumber}</span>{COMPANY.bankAccountTitle ? ` (${COMPANY.bankAccountTitle})` : ""}</span>
+          )}
+        </div>
+      )}
       <div className="mt-3 flex items-center justify-between">
         <div className="text-sm font-bold uppercase tracking-[0.2em]">{docTitle}</div>
         <div className="text-right text-xs">

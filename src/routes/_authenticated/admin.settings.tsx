@@ -23,10 +23,12 @@ const BUSINESS: { key: keyof Company; label: string; hint?: string }[] = [
   { key: "branch", label: "Branch" },
 ];
 const BANK: { key: keyof Company; label: string; hint?: string }[] = [
+  { key: "jazzcashNumber", label: "JazzCash number" },
+  { key: "jazzcashTitle", label: "JazzCash account title" },
   { key: "bankName", label: "Bank name" },
-  { key: "bankAccountTitle", label: "Account title" },
-  { key: "bankAccountNumber", label: "Account number", hint: "Once filled in, every slip prints the transfer details" },
-  { key: "bankIban", label: "IBAN" },
+  { key: "bankAccountTitle", label: "Bank account title" },
+  { key: "bankAccountNumber", label: "Bank account number", hint: "Every slip prints whichever accounts are filled in" },
+  { key: "bankIban", label: "IBAN (optional)" },
 ];
 
 /** Owner-editable company details — slips, letterheads, contact page. */
@@ -34,13 +36,17 @@ function BusinessSettings() {
   const live = useCompany();
   const [form, setForm] = useState<Company>(live);
   const [saving, setSaving] = useState(false);
-  useEffect(() => { setForm(live); }, [live]);
+  // Follow the live values only until the owner starts typing, so a fetch
+  // that lands mid-edit doesn't wipe the form.
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => { if (!dirty) setForm(live); }, [live, dirty]);
 
   const save = async () => {
     setSaving(true);
     try {
       const { error } = await saveCompany(form);
       if (error) return toast.error(error);
+      setDirty(false); // adopt the saved (trimmed) values the store reloads
       toast.success("Business details saved — slips, letterheads and the website now use them");
     } finally {
       setSaving(false);
@@ -50,7 +56,8 @@ function BusinessSettings() {
   const field = ({ key, label, hint }: { key: keyof Company; label: string; hint?: string }) => (
     <div key={key} className="space-y-1.5">
       <Label>{label}</Label>
-      <Input value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
+      <Input value={form[key]} disabled={saving}
+             onChange={(e) => { setDirty(true); setForm({ ...form, [key]: e.target.value }); }} />
       {hint && <div className="text-[11px] text-muted-foreground">{hint}</div>}
     </div>
   );
@@ -64,9 +71,9 @@ function BusinessSettings() {
           <div className="grid sm:grid-cols-2 gap-3">{BUSINESS.map(field)}</div>
         </div>
         <div className="rounded-2xl bg-card p-5 shadow-sm space-y-3 h-fit">
-          <div className="font-semibold flex items-center gap-2"><Landmark className="h-4 w-4 text-gold" /> Bank transfer details</div>
+          <div className="font-semibold flex items-center gap-2"><Landmark className="h-4 w-4 text-gold" /> Payment accounts (JazzCash &amp; bank)</div>
           <div className="text-xs text-muted-foreground">
-            Leave blank to keep them off the slip. Fill in the account number and every slip you send out carries it automatically.
+            Printed on every invoice so customers can pay by transfer. Clear a field to take that account off the slip.
           </div>
           <div className="grid gap-3">{BANK.map(field)}</div>
         </div>

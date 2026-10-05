@@ -209,6 +209,13 @@ function PosPage() {
   };
 
   const stockUnits = matches.reduce((a, p) => a + (Number(p.quantity_in_stock) || 0), 0);
+  // The printed sheet ignores the browse toggle: with no search it lists
+  // every product, zero-stock lines included — a stock-take needs those.
+  const printList = useMemo(
+    () => (q.trim() ? products.filter((p) => matchesQuery(p.product_name, q)) : products),
+    [products, q],
+  );
+  const printUnits = printList.reduce((a, p) => a + (Number(p.quantity_in_stock) || 0), 0);
 
   return (
     <AdminShell title="Quick Sale (POS)">
@@ -432,7 +439,7 @@ function PosPage() {
               <div className="text-sm">
                 {shortDate(localToday())}
                 {q.trim() ? ` · search: “${q.trim()}”` : " · all products"}
-                {` · ${matches.length} product${matches.length === 1 ? "" : "s"} · ${stockUnits} unit${stockUnits === 1 ? "" : "s"}`}
+                {` · ${printList.length} product${printList.length === 1 ? "" : "s"} · ${printUnits} unit${printUnits === 1 ? "" : "s"}`}
               </div>
             </div>
             <table className="w-full text-sm">
@@ -448,7 +455,7 @@ function PosPage() {
                 {/* Paper copy stays alphabetical — it's a lookup sheet, not a
                     picking list, so the on-screen stock-first order would only
                     make products harder to find. */}
-                {[...matches].sort((a, b) => (a.product_name ?? "").localeCompare(b.product_name ?? "")).map((p, i) => (
+                {[...printList].sort((a, b) => (a.product_name ?? "").localeCompare(b.product_name ?? "")).map((p, i) => (
                   <tr key={p.id} className="border-b">
                     <td className="py-1.5 pr-2">{i + 1}</td>
                     <td className="py-1.5 pr-2">{p.product_name}</td>
@@ -460,7 +467,7 @@ function PosPage() {
               <tfoot>
                 <tr className="font-bold">
                   <td className="py-2" colSpan={3}>Total units</td>
-                  <td className="py-2 text-right">{stockUnits}</td>
+                  <td className="py-2 text-right">{printUnits}</td>
                 </tr>
               </tfoot>
             </table>

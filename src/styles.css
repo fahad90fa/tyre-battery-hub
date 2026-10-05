@@ -3,6 +3,13 @@
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
+/* `print:` utilities apply in the print dialog and, from the moment
+   printArea() starts printing, on screen too (see the print rules at the
+   bottom of this file). */
+@custom-variant print {
+  @media print { @slot }
+  &:where(html.printing, html.printing *) { @slot }
+}
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
@@ -140,46 +147,49 @@
 
 /* Print: printArea() (src/lib/print.ts) clones the .print-area into
    #print-root and sets html.printing, so the printed document is plain
-   top-level flow — no dialog transforms, clipping or scattered fragments. */
+   top-level flow — no dialog transforms, clipping or scattered fragments.
+   These rules key off html.printing rather than @media print so they take
+   effect on screen the moment printing starts: a .print-one-page document
+   is then measured with its real print layout before the dialog opens. */
 #print-root { display: none; }
 
 @media print {
   @page { size: A4; margin: 12mm; }
-
-  html.printing, html.printing body {
-    background: #fff !important;
-    height: auto !important;
-    overflow: visible !important;
-  }
-  /* Hide the app; show only the cloned document. */
-  html.printing body > *:not(#print-root) { display: none !important; }
-  html.printing #print-root { display: block !important; }
-  html.printing #print-root,
-  html.printing #print-root * {
-    position: static !important;
-    transform: none !important;
-    translate: none !important;
-    max-height: none !important;
-    overflow: visible !important;
-    box-shadow: none !important;
-  }
-  /* Plain reports print black-on-white; a document designed in full colour
-     (the invoice) opts out by putting .print-keep on its print-area root. */
-  html.printing #print-root :not(.print-keep, .print-keep *) {
-    color: #000 !important;
-    background: transparent !important;
-  }
-  html.printing #print-root .print-keep,
-  html.printing #print-root .print-keep * {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-  html.printing #print-root .print-area { padding: 0 !important; }
-  /* Keep tables and cards from splitting awkwardly across pages. */
-  html.printing #print-root table { page-break-inside: auto; width: 100% !important; }
-  html.printing #print-root tr { page-break-inside: avoid; }
-  html.printing #print-root thead { display: table-header-group; }
-  html.printing #print-root .print-avoid-break { page-break-inside: avoid; }
-  /* Elements explicitly marked as screen-only. */
-  html.printing #print-root .print\:hidden, html.printing .no-print { display: none !important; }
 }
+
+html.printing, html.printing body {
+  background: #fff !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+/* Hide the app; show only the cloned document. */
+html.printing body > *:not(#print-root) { display: none !important; }
+html.printing #print-root { display: block !important; }
+html.printing #print-root,
+html.printing #print-root * {
+  position: static !important;
+  transform: none !important;
+  translate: none !important;
+  max-height: none !important;
+  overflow: visible !important;
+  box-shadow: none !important;
+}
+/* Plain reports print black-on-white; a document designed in full colour
+   (the invoice) opts out by putting .print-keep on its print-area root. */
+html.printing #print-root :not(.print-keep, .print-keep *) {
+  color: #000 !important;
+  background: transparent !important;
+}
+html.printing #print-root .print-keep,
+html.printing #print-root .print-keep * {
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+}
+html.printing #print-root .print-area { padding: 0 !important; }
+/* Keep tables and cards from splitting awkwardly across pages. */
+html.printing #print-root table { page-break-inside: auto; width: 100% !important; }
+html.printing #print-root tr { page-break-inside: avoid; }
+html.printing #print-root thead { display: table-header-group; }
+html.printing #print-root .print-avoid-break { page-break-inside: avoid; }
+/* Elements explicitly marked as screen-only. */
+html.printing #print-root .print\:hidden, html.printing .no-print { display: none !important; }

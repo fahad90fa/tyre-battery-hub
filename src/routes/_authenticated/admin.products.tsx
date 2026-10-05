@@ -33,6 +33,7 @@ function ProductsAdmin() {
   const [form, setForm] = useState<any>(empty);
   const [editing, setEditing] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const load = async () => {
     const [{ data: p }, { data: c }, { data: s }, { data: b }] = await Promise.all([
@@ -49,6 +50,12 @@ function ProductsAdmin() {
   useEffect(() => { load(); }, []);
 
   const save = async () => {
+    if (saving) return; // a double tap must not create the product twice
+    setSaving(true);
+    try { await persist(); } finally { setSaving(false); }
+  };
+
+  const persist = async () => {
     const payload = { ...form,
       category_id: form.category_id || null,
       subcategory_id: form.subcategory_id || null,
@@ -58,9 +65,9 @@ function ProductsAdmin() {
       selling_price: Number(form.selling_price),
       is_featured: !!form.is_featured,
       is_deal: !!form.is_deal,
-      // A deal runs through the end of the chosen day.
+      // A deal runs through the end of the chosen day (form holds YYYY-MM-DD).
       deal_end_date: form.is_deal && form.deal_end_date
-        ? new Date(`${String(form.deal_end_date).slice(0, 10)}T23:59:59`).toISOString() : null,
+        ? new Date(`${form.deal_end_date}T23:59:59`).toISOString() : null,
     };
     const { error } = editing
       ? await supabase.from("products").update(payload).eq("id", editing)
@@ -79,7 +86,9 @@ function ProductsAdmin() {
 
   const edit = (r: any) => {
     setEditing(r.id);
-    setForm({ ...empty, ...r, category_id: r.category_id ?? "", subcategory_id: r.subcategory_id ?? "", brand_id: r.brand_id ?? "" });
+    setForm({ ...empty, ...r, category_id: r.category_id ?? "", subcategory_id: r.subcategory_id ?? "", brand_id: r.brand_id ?? "",
+      // Keep the local calendar day in the form; the stored value is an instant.
+      deal_end_date: r.deal_end_date ? (localDateOf(r.deal_end_date) || String(r.deal_end_date).slice(0, 10)) : "" });
     setOpen(true);
   };
 
@@ -136,13 +145,13 @@ function ProductsAdmin() {
               </Field>
               {form.is_deal && (
                 <Field label="Deal ends on">
-                  <Input type="date" value={form.deal_end_date ? localDateOf(form.deal_end_date) || String(form.deal_end_date).slice(0, 10) : ""}
+                  <Input type="date" value={form.deal_end_date || ""}
                          onChange={(e) => setForm({ ...form, deal_end_date: e.target.value })} />
                 </Field>
               )}
               <Field label="Description" full><Textarea value={form.description ?? ""} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
             </div>
-            <Button className="w-full mt-2" onClick={save}>Save</Button>
+            <Button className="w-full mt-2" onClick={save} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
           </DialogContent>
         </Dialog>
       </div>

@@ -16,10 +16,12 @@ export const COMPANY = {
   phone: "0304-0510256",
   email: "muzaffartyresandbatteries@gmail.com",
   website: "mtbhouse.store",
-  // Bank transfer details printed on every slip once filled in.
-  bankName: "",
-  bankAccountTitle: "",
-  bankAccountNumber: "",
+  // Payment accounts printed on every slip (blank = not shown).
+  jazzcashNumber: "03017881150",
+  jazzcashTitle: "Muzaffar Iqbal",
+  bankName: "Bank Alfalah",
+  bankAccountTitle: "Muzaffar Tyre and Battery House",
+  bankAccountNumber: "01661003362641",
   bankIban: "",
 };
 export type Company = typeof COMPANY;
@@ -28,9 +30,15 @@ export type Company = typeof COMPANY;
 export const COMPANY_KEYS: Record<keyof Company, string> = {
   name: "name", fullName: "full_name", tagline: "tagline", address: "address", branch: "branch",
   phone: "phone", email: "email", website: "website",
+  jazzcashNumber: "jazzcash_number", jazzcashTitle: "jazzcash_title",
   bankName: "bank_name", bankAccountTitle: "bank_account_title",
   bankAccountNumber: "bank_account_number", bankIban: "bank_iban",
 };
+
+/** Payment-account fields: a blank saved value means "don't print it". */
+const PAYMENT_FIELDS: (keyof Company)[] = [
+  "jazzcashNumber", "jazzcashTitle", "bankName", "bankAccountTitle", "bankAccountNumber", "bankIban",
+];
 
 let current: Company = { ...COMPANY };
 let pending: Promise<Company> | null = null;
@@ -39,23 +47,30 @@ const listeners = new Set<(c: Company) => void>();
 /** Load the owner's saved details once (shared by every component). */
 export function loadCompany(force = false): Promise<Company> {
   if (pending && !force) return pending;
-  pending = (async () => {
-    const { data } = await supabase.from("app_settings").select("key, value");
-    if (data && data.length > 0) {
+  let load: Promise<Company> | null = null;
+  load = (async () => {
+    const { data, error } = await supabase.from("app_settings").select("key, value");
+    if (error || !data) {
+      // Don't cache a failed fetch — the next component to mount retries,
+      // instead of every slip printing the defaults until a full reload.
+      if (pending === load) pending = null;
+      return current;
+    }
+    if (data.length > 0) {
       const next: Company = { ...COMPANY };
       (Object.keys(COMPANY_KEYS) as (keyof Company)[]).forEach((field) => {
         const row = data.find((r) => r.key === COMPANY_KEYS[field]);
-        // A blank saved value falls back to the built-in default.
-        if (row && row.value.trim() !== "") next[field] = row.value.trim();
-        // Bank fields are blank by default and only shown when set.
-        if (row && field.startsWith("bank")) next[field] = row.value.trim();
+        // A blank saved value falls back to the built-in default — except
+        // payment accounts, where blank means the owner removed it.
+        if (row && (row.value.trim() !== "" || PAYMENT_FIELDS.includes(field))) next[field] = row.value.trim();
       });
       current = next;
       listeners.forEach((l) => l(current));
     }
     return current;
   })();
-  return pending;
+  pending = load;
+  return load;
 }
 
 /** Live company details: defaults first, then whatever the owner saved. */
