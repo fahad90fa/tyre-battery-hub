@@ -80,9 +80,9 @@ create table public.products (
   product_name text,
   quantity_in_stock integer,
   description text,
-  brand_id uuid,
+  brand_id uuid references public.brands(id) on delete set null,
   subcategory_id uuid,
-  category_id uuid,
+  category_id uuid references public.categories(id) on delete set null,
   deal_end_date timestamptz,
   is_deal boolean,
   created_at timestamptz not null default now(),
@@ -138,7 +138,7 @@ create table public.invoice_items (
   unit_price numeric,
   quantity integer,
   product_id uuid,
-  invoice_id uuid,
+  invoice_id uuid references public.invoices(id) on delete cascade,
   id uuid primary key default gen_random_uuid(),
   cost_price numeric
 );
@@ -157,7 +157,7 @@ create table public.customer_purchases (
   payment_due_date date,
   id uuid primary key default gen_random_uuid(),
   customer_id uuid,
-  product_id uuid,
+  product_id uuid references public.products(id) on delete set null,
   quantity_purchased integer,
   total_price numeric,
   purchase_date date,
@@ -252,7 +252,7 @@ create table public.reports_inbox (
 );
 
 create table public.templates (
-  category_id uuid,
+  category_id uuid references public.categories(id) on delete set null,
   id uuid primary key default gen_random_uuid(),
   notes text,
   description text,
