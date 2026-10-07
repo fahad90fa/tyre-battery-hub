@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Quote } from "lucide-react";
 import avatar from "@/assets/testimonial-avatar.jpg";
+import { supabase } from "@/integrations/supabase/client";
 
 const T = [
   {
@@ -14,12 +15,27 @@ const T = [
   },
 ];
 
+type Item = { name: string; msg: string; avatar_url?: string | null };
+
+/** Customer reviews from Admin → Testimonials; the built-in two show until
+ *  the owner adds their own. */
 export function Testimonials() {
+  const [list, setList] = useState<Item[]>(T);
   const [i, setI] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setI((p) => (p + 1) % T.length), 5000);
-    return () => clearInterval(t);
+    (async () => {
+      const { data } = await supabase.from("testimonials")
+        .select("id, customer_name, message, avatar_url").order("created_at", { ascending: false }).limit(12);
+      if (data && data.length > 0) {
+        setList(data.map((r) => ({ name: r.customer_name, msg: r.message, avatar_url: r.avatar_url })));
+        setI(0);
+      }
+    })();
   }, []);
+  useEffect(() => {
+    const t = setInterval(() => setI((p) => (p + 1) % list.length), 5000);
+    return () => clearInterval(t);
+  }, [list.length]);
 
   return (
     <section className="px-4 mt-10 mb-10">
@@ -35,19 +51,19 @@ export function Testimonials() {
               transition={{ duration: 0.5 }}
             >
               <img
-                src={avatar}
-                alt={T[i].name}
+                src={list[i]?.avatar_url || avatar}
+                alt={list[i]?.name ?? ""}
                 width={80}
                 height={80}
                 className="mx-auto h-20 w-20 rounded-full object-cover ring-4 ring-card"
               />
-              <p className="mt-6 text-foreground/80 leading-relaxed">{T[i].msg}</p>
-              <div className="mt-4 font-bold">{T[i].name}</div>
+              <p className="mt-6 text-foreground/80 leading-relaxed">{list[i]?.msg}</p>
+              <div className="mt-4 font-bold">{list[i]?.name}</div>
             </motion.div>
           </AnimatePresence>
         </div>
         <div className="flex justify-center gap-2 mt-4">
-          {T.map((_, idx) => (
+          {list.map((_, idx) => (
             <button
               key={idx}
               onClick={() => setI(idx)}

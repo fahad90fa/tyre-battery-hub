@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { COMPANY } from "@/lib/company";
+import { COMPANY, useCompany } from "@/lib/company";
 
 export const Route = createFileRoute("/contact")({
   head: () => ({
@@ -30,6 +30,7 @@ const schema = z.object({
 });
 
 function Contact() {
+  const company = useCompany();
   const [form, setForm] = useState({ from_name: "", from_email: "", from_phone: "", subject: "", message: "" });
   const [busy, setBusy] = useState(false);
 
@@ -52,10 +53,10 @@ function Contact() {
 
         <div className="grid md:grid-cols-2 gap-4 mt-8">
           {[
-            { icon: Phone, label: "Phone", value: COMPANY.phone },
-            { icon: MessageCircle, label: "WhatsApp", value: COMPANY.phone },
-            { icon: Mail, label: "Email", value: COMPANY.email },
-            { icon: MapPin, label: "Address", value: COMPANY.address },
+            { icon: Phone, label: "Phone", value: company.phone },
+            { icon: MessageCircle, label: "WhatsApp", value: company.phone },
+            { icon: Mail, label: "Email", value: company.email },
+            { icon: MapPin, label: "Address", value: company.address },
           ].map(({ icon: Icon, label, value }) => (
             <div key={label} className="flex items-start gap-4 rounded-2xl bg-card p-6 shadow-sm">
               <div className="h-11 w-11 rounded-full bg-primary/10 grid place-items-center text-primary shrink-0">

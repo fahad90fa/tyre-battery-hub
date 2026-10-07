@@ -57,10 +57,13 @@ function PosPage() {
   // "Bandalayar 12 Evergreen" and "Evergreen Bandalayar 12" both match.
   // Products with stock come first (alphabetical); out-of-stock ones sink
   // to the very bottom so the sellable items are always in front.
-  const matches = useMemo(
-    () => inStockFirst(q.trim() ? products.filter((p) => matchesQuery(p.product_name, q)) : products),
-    [products, q],
-  );
+  // Browsing shows only what can be sold right now; a typed search still
+  // finds out-of-stock products (sorted last) so nothing is ever lost.
+  const [showOutOfStock, setShowOutOfStock] = useState(false);
+  const matches = useMemo(() => {
+    if (q.trim()) return inStockFirst(products.filter((p) => matchesQuery(p.product_name, q)));
+    return inStockFirst(showOutOfStock ? products : products.filter((p) => (Number(p.quantity_in_stock) || 0) > 0));
+  }, [products, q, showOutOfStock]);
   const filtered = useMemo(() => matches.slice(0, q.trim() ? 60 : 30), [matches, q]);
 
   // Render the print-only stock list, then hand it to the browser.
@@ -206,6 +209,13 @@ function PosPage() {
   };
 
   const stockUnits = matches.reduce((a, p) => a + (Number(p.quantity_in_stock) || 0), 0);
+  // The printed sheet ignores the browse toggle: with no search it lists
+  // every product, zero-stock lines included — a stock-take needs those.
+  const printList = useMemo(
+    () => (q.trim() ? products.filter((p) => matchesQuery(p.product_name, q)) : products),
+    [products, q],
+  );
+  const printUnits = printList.reduce((a, p) => a + (Number(p.quantity_in_stock) || 0), 0);
 
   return (
     <AdminShell title="Quick Sale (POS)">
@@ -217,6 +227,10 @@ function PosPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input autoFocus placeholder="Search product... (any word order)" value={q} onChange={(e) => setQ(e.target.value)} className="pl-9 h-11" />
             </div>
+            <Button variant={showOutOfStock ? "secondary" : "outline"} className="h-11" onClick={() => setShowOutOfStock((v) => !v)}
+                    title="Browse out-of-stock products too (a search always finds them)">
+              {showOutOfStock ? "Hide out of stock" : "Show out of stock"}
+            </Button>
             <Button variant="outline" className="h-11" onClick={() => setStockPrint(true)}
                     title="Print the stock list currently matching the search">
               <Printer className="h-4 w-4 mr-2" /> Print stock list
@@ -425,7 +439,7 @@ function PosPage() {
               <div className="text-sm">
                 {shortDate(localToday())}
                 {q.trim() ? ` · search: “${q.trim()}”` : " · all products"}
-                {` · ${matches.length} product${matches.length === 1 ? "" : "s"} · ${stockUnits} unit${stockUnits === 1 ? "" : "s"}`}
+                {` · ${printList.length} product${printList.length === 1 ? "" : "s"} · ${printUnits} unit${printUnits === 1 ? "" : "s"}`}
               </div>
             </div>
             <table className="w-full text-sm">
@@ -441,7 +455,7 @@ function PosPage() {
                 {/* Paper copy stays alphabetical — it's a lookup sheet, not a
                     picking list, so the on-screen stock-first order would only
                     make products harder to find. */}
-                {[...matches].sort((a, b) => (a.product_name ?? "").localeCompare(b.product_name ?? "")).map((p, i) => (
+                {[...printList].sort((a, b) => (a.product_name ?? "").localeCompare(b.product_name ?? "")).map((p, i) => (
                   <tr key={p.id} className="border-b">
                     <td className="py-1.5 pr-2">{i + 1}</td>
                     <td className="py-1.5 pr-2">{p.product_name}</td>
@@ -453,7 +467,7 @@ function PosPage() {
               <tfoot>
                 <tr className="font-bold">
                   <td className="py-2" colSpan={3}>Total units</td>
-                  <td className="py-2 text-right">{stockUnits}</td>
+                  <td className="py-2 text-right">{printUnits}</td>
                 </tr>
               </tfoot>
             </table>

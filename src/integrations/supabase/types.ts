@@ -14,6 +14,12 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_settings: {
+        Row: { key: string; updated_at: string; value: string }
+        Insert: { key: string; updated_at?: string; value?: string }
+        Update: { key?: string; updated_at?: string; value?: string }
+        Relationships: []
+      }
       amanat_items: {
         Row: {
           amanat_no: string | null

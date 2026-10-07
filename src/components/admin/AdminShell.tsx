@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Package, Tag, Truck, Users, Wallet, FileText, BarChart3,
   ShoppingCart, LogOut, Wrench, Store, UserCircle, Briefcase, LayoutTemplate,
   Inbox, Settings, Menu, FileSpreadsheet, Zap, CalendarCheck, ArrowLeftRight, HandCoins, PackageOpen,
+  Building2, MessageSquareQuote,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { signOut, useAuth } from "@/hooks/useAuth";
@@ -42,9 +43,11 @@ const GROUPS: { label: string; links: { to: string; label: string; icon: any; ex
   ]},
   { label: "Support", links: [
     { to: "/admin/inbox", label: "Inbox", icon: Inbox },
+    { to: "/admin/testimonials", label: "Testimonials", icon: MessageSquareQuote },
   ]},
   { label: "Account", links: [
     { to: "/admin/profile", label: "Profile", icon: Settings },
+    { to: "/admin/settings", label: "Business Settings", icon: Building2 },
   ]},
 ];
 
