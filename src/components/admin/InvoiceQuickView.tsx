@@ -149,7 +149,9 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
             )}
 
             {/* ============ Bill to + payment facts ============ */}
-            <div className="grid sm:grid-cols-2 gap-3 px-5 mt-4 print:mt-2 print-avoid-break">
+            {/* print:grid-cols-2 keeps the layout viewport-independent, so a
+                phone measures the same height the A4 sheet will print. */}
+            <div className="grid sm:grid-cols-2 print:grid-cols-2 gap-3 px-5 mt-4 print:mt-2 print-avoid-break">
               <div className="relative rounded-xl border-2 border-zinc-200 p-4 pt-6 print:p-3 print:pt-5">
                 <div className="absolute top-0 left-0 bg-zinc-950 text-white text-[9px] font-bold px-3 py-1 rounded-br-lg rounded-tl-[10px] uppercase tracking-widest">Bill to</div>
                 <div className="flex items-center gap-3">
