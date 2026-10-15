@@ -5,6 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { printArea } from "@/lib/print";
 import { money, shortDate, localToday } from "@/lib/format";
 import { effectivePrice, inStockFirst } from "@/lib/pricing";
+import { stockLabel } from "@/lib/stock";
+import { confirmStockForSale } from "@/lib/products";
 import { Letterhead } from "@/components/admin/Letterhead";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { Button } from "@/components/ui/button";
@@ -46,7 +48,7 @@ function QuotationsAdmin() {
   const load = async () => {
     const [{ data: r }, { data: p }, { data: c }] = await Promise.all([
       supabase.from("quotations").select("*").order("created_at", { ascending: false }),
-      fetchAll((a, b) => supabase.from("products").select("id, product_name, selling_price, purchase_price, quantity_in_stock").order("id").range(a, b)),
+      fetchAll((a, b) => supabase.from("products").select("id, product_name, selling_price, purchase_price, quantity_in_stock, track_stock").order("id").range(a, b)),
       supabase.from("clients").select("id, name, account_no").order("name"),
     ]);
     setRows(r ?? []); setProducts(p ?? []); setClients(c ?? []);
@@ -137,6 +139,8 @@ function QuotationsAdmin() {
     if (viewItems.some((it) => it.quotation_id !== viewing.id))
       return toast.error("Items still loading — try again");
     if (!confirm(`Convert ${viewing.quote_no} into an invoice? Stock will be reduced for linked products.`)) return;
+    // Live stock check on the linked products — selling past zero needs a yes.
+    if (!(await confirmStockForSale(viewItems.map((it) => ({ product_id: it.product_id, qty: Number(it.quantity) }))))) return;
 
     // Claim the conversion atomically first so a double click or second
     // session can never create two invoices from the same quotation.
@@ -177,20 +181,8 @@ function QuotationsAdmin() {
       return toast.error(itemsErr.message);
     }
 
-    // Aggregate per product so repeated products decrement correctly.
-    const deltas = new Map<string, number>();
-    for (const it of viewItems) {
-      if (it.product_id) deltas.set(it.product_id, (deltas.get(it.product_id) ?? 0) + Number(it.quantity));
-    }
-    for (const [pid, qty] of deltas) {
-      const prod = products.find((p) => p.id === pid);
-      if (prod) {
-        const { error: stockErr } = await supabase.from("products").update({
-          quantity_in_stock: Math.max(0, prod.quantity_in_stock - qty),
-        }).eq("id", pid);
-        if (stockErr) toast.error(`Stock update failed for ${prod.product_name}: ${stockErr.message}`);
-      }
-    }
+    // Stock: the invoice_items trigger has already taken the linked
+    // products' units off products.quantity_in_stock.
 
     if (viewing.client_id) {
       const { error: ledErr } = await supabase.from("client_ledger").insert({
@@ -287,7 +279,7 @@ function QuotationsAdmin() {
                   <div className="flex gap-1.5 items-center">
                     <div className="flex-1 min-w-0">
                       <SearchableSelect
-                        options={inStockFirst(products).map((p) => ({ value: p.id, label: p.product_name, hint: money(effectivePrice(p)) }))}
+                        options={inStockFirst(products).map((p) => ({ value: p.id, label: p.product_name, hint: `${money(effectivePrice(p))} · ${stockLabel(p)}` }))}
                         value={l.product_id}
                         onValueChange={(v) => {
                           const p = products.find((x) => x.id === v);

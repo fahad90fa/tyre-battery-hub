@@ -199,7 +199,11 @@ function InvoicesAdmin() {
         if (ledErr) toast.error(`Invoice updated but the account credit FAILED — add a credit of ${money(ledgerCredit)} (ref ${open.invoice_id}) to the account manually: ${ledErr.message}`);
       }
 
-      // 3. Shrink or remove the invoice lines.
+      // 3. Shrink or remove the invoice lines. This is ALSO the restock:
+      //    the invoice_items trigger puts the returned units back on
+      //    products.quantity_in_stock, so a line that fails here means the
+      //    stock was NOT restored — say so loudly, never just in passing.
+      const failedLines: string[] = [];
       for (const l of retLines) {
         const left = l.it.quantity - l.ret;
         const { error: itemErr } = left <= 0
@@ -207,24 +211,17 @@ function InvoicesAdmin() {
           : await supabase.from("invoice_items")
               .update({ quantity: left, total_price: toPaisa(Number(l.it.total_price) - lineReturnValue(l.it, l.ret)) })
               .eq("id", l.it.id);
-        if (itemErr) toast.error(`Could not update the invoice line for ${l.it.product_name}: ${itemErr.message}`);
+        if (itemErr) {
+          failedLines.push(l.it.product_name);
+          toast.error(
+            `Invoice line for ${l.it.product_name} was NOT updated and its ${l.ret} unit(s) were NOT restocked — ` +
+            `the invoice total has already been reduced. Open the invoice and retry the return for this line: ${itemErr.message}`,
+            { duration: 15000 },
+          );
+        }
       }
 
-      // 4. Put the returned quantities back into stock (fresh counts, so a
-      //    sale made meanwhile isn't overwritten).
-      for (const l of retLines) {
-        if (!l.it.product_id) continue;
-        const { data: prod, error: readErr } = await supabase.from("products")
-          .select("quantity_in_stock, product_name").eq("id", l.it.product_id).maybeSingle();
-        const { error: stockErr } = prod
-          ? await supabase.from("products")
-              .update({ quantity_in_stock: (Number(prod.quantity_in_stock) || 0) + l.ret })
-              .eq("id", l.it.product_id)
-          : { error: readErr };
-        if (stockErr) toast.error(`Restock FAILED for ${l.it.product_name} — add ${l.ret} back to its stock manually: ${stockErr.message}`);
-      }
-
-      // 5. Sales history: negative rows dated on the sale day, so reports
+      // 4. Sales history: negative rows dated on the sale day, so reports
       //    and the dashboard net the return out of that day's figures.
       const saleDay = localDateOf(open.created_at) || localToday();
       const { error: cpErr } = await supabase.from("customer_purchases").insert(retLines.map((l) => ({
@@ -235,7 +232,7 @@ function InvoicesAdmin() {
       })));
       if (cpErr) toast.error(`Return saved, but the sales history row failed: ${cpErr.message}`);
 
-      // 6. If they had paid more than what's left, hand the cash back and
+      // 5. If they had paid more than what's left, hand the cash back and
       //    book it, so the daily closing shows the money going out.
       if (willRefundCash) {
         const { error: expErr } = await supabase.from("expenses").insert({
@@ -254,9 +251,13 @@ function InvoicesAdmin() {
         }
       }
 
-      toast.success(newTotal <= 0
-        ? `Invoice ${open.invoice_id} cancelled — stock restored${willRefundCash ? `, ${money(refundDue)} refunded` : ""}`
-        : `Return recorded — invoice now ${money(newTotal)}, stock restored`);
+      if (failedLines.length > 0) {
+        toast.error(`Return saved with problems — ${failedLines.join(", ")} not restocked (see above)`, { duration: 15000 });
+      } else {
+        toast.success(newTotal <= 0
+          ? `Invoice ${open.invoice_id} cancelled — stock restored${willRefundCash ? `, ${money(refundDue)} refunded` : ""}`
+          : `Return recorded — invoice now ${money(newTotal)}, stock restored`);
+      }
       setReturnOpen(false);
       await load();
       const { data: fresh } = await supabase.from("invoices").select("*").eq("id", open.id).maybeSingle();

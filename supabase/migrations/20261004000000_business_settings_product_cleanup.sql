@@ -38,7 +38,19 @@ declare
   grp record;
   keeper uuid;
   rest record;
+  twins uuid[];
+  trg record;
 begin
+  -- The stock-ledger triggers (20261015) would move stock along with the
+  -- re-pointed ledger rows and double-count it; the keeper's stock is set
+  -- explicitly below, so pause them for the merge.
+  for trg in
+    select c.relname, t.tgname from pg_trigger t join pg_class c on c.oid = t.tgrelid
+    where t.tgname like 'stock\_ledger\_%' and not t.tgisinternal
+  loop
+    execute format('alter table public.%I disable trigger %I', trg.relname, trg.tgname);
+  end loop;
+
   for grp in
     select lower(regexp_replace(trim(product_name), '\s+', ' ', 'g')) as norm, array_agg(id) as ids
     from public.products
@@ -54,7 +66,22 @@ begin
              coalesce(p.selling_price, 0) desc, p.created_at desc
     limit 1;
 
-    select coalesce(sum(case when c.twin then 0 else coalesce(c.quantity_in_stock, 0) end), 0) as extra_stock,
+    -- the same entry saved twice: never booked in, and an identical row
+    -- (stock and prices) was created within a minute after it — its stock
+    -- is the same units counted twice, so it is not added
+    select coalesce(array_agg(c.id), '{}') into twins
+    from public.products c
+    where c.id = any(grp.ids) and c.id <> keeper
+      and not exists (select 1 from public.stock_purchases sp where sp.product_id = c.id)
+      and exists (select 1 from public.products o
+                  where o.id = any(grp.ids) and o.id <> c.id
+                    and coalesce(o.quantity_in_stock, 0) = coalesce(c.quantity_in_stock, 0)
+                    and coalesce(o.selling_price, 0) = coalesce(c.selling_price, 0)
+                    and coalesce(o.purchase_price, 0) = coalesce(c.purchase_price, 0)
+                    and o.created_at >= c.created_at and o.created_at < c.created_at + interval '1 minute'
+                    and (o.created_at > c.created_at or o.id > c.id));
+
+    select coalesce(sum(case when c.id = any(twins) then 0 else coalesce(c.quantity_in_stock, 0) end), 0) as extra_stock,
            coalesce(max(coalesce(c.selling_price, 0)), 0)  as best_price,
            coalesce(max(coalesce(c.purchase_price, 0)), 0) as best_cost,
            max(nullif(c.image_url, ''))      as image_url,
@@ -66,27 +93,20 @@ begin
            bool_or(c.is_deal)                as is_deal,
            max(c.deal_end_date)              as deal_end_date
       into rest
-    from (
-      select c.*,
-             -- the same entry saved twice: never booked in, and an identical
-             -- row (stock and prices) was created within a minute after it
-             (not exists (select 1 from public.stock_purchases sp where sp.product_id = c.id)
-              and exists (select 1 from public.products o
-                          where o.id = any(grp.ids) and o.id <> c.id
-                            and coalesce(o.quantity_in_stock, 0) = coalesce(c.quantity_in_stock, 0)
-                            and coalesce(o.selling_price, 0) = coalesce(c.selling_price, 0)
-                            and coalesce(o.purchase_price, 0) = coalesce(c.purchase_price, 0)
-                            and o.created_at >= c.created_at and o.created_at < c.created_at + interval '1 minute'
-                            and (o.created_at > c.created_at or o.id > c.id))) as twin
-      from public.products c
-      where c.id = any(grp.ids) and c.id <> keeper
-    ) c;
+    from public.products c
+    where c.id = any(grp.ids) and c.id <> keeper;
 
     update public.invoice_items      set product_id = keeper where product_id = any(grp.ids) and product_id <> keeper;
     update public.customer_purchases set product_id = keeper where product_id = any(grp.ids) and product_id <> keeper;
     update public.stock_purchases    set product_id = keeper where product_id = any(grp.ids) and product_id <> keeper;
     update public.quotation_items    set product_id = keeper where product_id = any(grp.ids) and product_id <> keeper;
     update public.amanat_items       set product_id = keeper where product_id = any(grp.ids) and product_id <> keeper;
+    if to_regclass('public.stock_adjustments') is not null then
+      -- counts recorded on the other copies follow their units to the keeper;
+      -- a twin's count is dropped with the twin (its units were counted once)
+      update public.stock_adjustments set product_id = keeper
+      where product_id = any(grp.ids) and product_id <> keeper and not (product_id = any(twins));
+    end if;
 
     update public.products
     set quantity_in_stock = coalesce(quantity_in_stock, 0) + rest.extra_stock,
@@ -103,6 +123,13 @@ begin
     where id = keeper;
 
     delete from public.products where id = any(grp.ids) and id <> keeper;
+  end loop;
+
+  for trg in
+    select c.relname, t.tgname from pg_trigger t join pg_class c on c.oid = t.tgrelid
+    where t.tgname like 'stock\_ledger\_%' and not t.tgisinternal
+  loop
+    execute format('alter table public.%I enable trigger %I', trg.relname, trg.tgname);
   end loop;
 end $$;
 

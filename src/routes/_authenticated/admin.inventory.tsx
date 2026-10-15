@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate, localDateOf, localToday } from "@/lib/format";
 import { matchesQuery } from "@/lib/search";
 import { effectivePrice, inStockFirst } from "@/lib/pricing";
+import { stockOf, isTracked, inStock, oversold, stockLabel } from "@/lib/stock";
 import { printArea } from "@/lib/print";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { Input } from "@/components/ui/input";
@@ -49,7 +50,7 @@ function Inventory() {
   useEffect(() => {
     (async () => {
       const [{ data: p }, { data: sin }, { data: sout }] = await Promise.all([
-        fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price, selling_price").order("product_name").order("id").range(a, b)),
+        fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock, track_stock, purchase_price, selling_price").order("product_name").order("id").range(a, b)),
         fetchAll((a, b) => supabase.from("stock_purchases").select("*, products(product_name), merchants(name)").order("date", { ascending: false }).order("created_at", { ascending: false }).order("id").range(a, b)),
         fetchAll((a, b) => supabase.from("invoice_items").select("*, invoices(invoice_id, customer_name, created_at)").order("id", { ascending: false }).order("id").range(a, b)),
       ]);
@@ -91,17 +92,25 @@ function Inventory() {
     return true;
   }), [movements, tab, productFilter, q]);
 
-  // The stock list to print: the COMPLETE product list with quantity and
-  // prices — a physical copy of what's on the shelf. (The search box here
-  // also matches parties/refs, so it must not filter the printout; the POS
-  // page prints a search-filtered list.)
-  const stockList = products;
-  const stockListUnits = stockList.reduce((a, p) => a + (Number(p.quantity_in_stock) || 0), 0);
-  const stockListValue = stockList.reduce((a, p) => a + Number(p.purchase_price ?? 0) * (Number(p.quantity_in_stock) || 0), 0);
+  // Only stock-tracked products count as stock: services and trade-ins are
+  // sold without ever being booked in. Units on hand are never negative —
+  // a product sold before its purchase was booked is simply out of stock.
+  const tracked = products.filter(isTracked);
+  const onHand = (p: any) => Math.max(0, stockOf(p));
 
-  const totalUnits = products.reduce((a, p) => a + (p.quantity_in_stock ?? 0), 0);
-  const stockValue = products.reduce((a, p) => a + Number(p.purchase_price ?? 0) * (p.quantity_in_stock ?? 0), 0);
-  const outOfStock = products.filter((p) => (p.quantity_in_stock ?? 0) <= 0).length;
+  // The stock list to print: every tracked product with quantity and
+  // prices — a physical copy of what's on the shelf (services/trade-ins
+  // are never on a shelf, so they are left off). The search box here also
+  // matches parties/refs, so it must not filter the printout; the POS page
+  // prints a search-filtered list.
+  const stockList = tracked;
+  const notListed = products.length - tracked.length;
+  const stockListUnits = stockList.reduce((a, p) => a + onHand(p), 0);
+  const stockListValue = stockList.reduce((a, p) => a + Number(p.purchase_price ?? 0) * onHand(p), 0);
+
+  const totalUnits = stockListUnits;
+  const stockValue = stockListValue;
+  const outOfStock = tracked.filter((p) => !inStock(p)).length;
   const selectedProduct = products.find((p) => p.id === productFilter);
   const selIn = productFilter ? filteredSum(movements, productFilter, "in") : 0;
   const selOut = productFilter ? filteredSum(movements, productFilter, "out") : 0;
@@ -125,7 +134,7 @@ function Inventory() {
         </Tabs>
         <div className="w-64">
           <SearchableSelect
-            options={inStockFirst(products).map((p) => ({ value: p.id, label: p.product_name, hint: `${p.quantity_in_stock} in stock` }))}
+            options={inStockFirst(products).map((p) => ({ value: p.id, label: p.product_name, hint: stockLabel(p) }))}
             value={productFilter}
             onValueChange={setProductFilter}
             placeholder="Filter by product"
@@ -148,9 +157,15 @@ function Inventory() {
       {selectedProduct && (
         <div className="mb-4 rounded-2xl bg-primary/5 border border-primary/20 p-4 grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
           <div><div className="text-[10px] uppercase text-muted-foreground tracking-wider">Product</div><b>{selectedProduct.product_name}</b></div>
-          <div><div className="text-[10px] uppercase text-muted-foreground tracking-wider">Current stock</div><b className={selectedProduct.quantity_in_stock > 0 ? "" : "text-destructive"}>{selectedProduct.quantity_in_stock}</b></div>
-          <div><div className="text-[10px] uppercase text-muted-foreground tracking-wider">Total received</div><b className="text-green-600">+{selIn}</b></div>
-          <div><div className="text-[10px] uppercase text-muted-foreground tracking-wider">Total sold / issued</div><b className="text-orange-500">−{selOut}</b></div>
+          <div>
+            <div className="text-[10px] uppercase text-muted-foreground tracking-wider">Current stock</div>
+            <b className={inStock(selectedProduct) ? "" : "text-destructive"}>{stockLabel(selectedProduct)}</b>
+            {oversold(selectedProduct) > 0 && (
+              <div className="text-[11px] text-destructive">{oversold(selectedProduct)} oversold — book the purchase</div>
+            )}
+          </div>
+          <div><div className="text-[10px] uppercase text-muted-foreground tracking-wider">Total received</div><b className="text-green-600">{selIn}</b></div>
+          <div><div className="text-[10px] uppercase text-muted-foreground tracking-wider">Total sold / issued</div><b className="text-orange-500">{selOut}</b></div>
         </div>
       )}
 
@@ -158,7 +173,7 @@ function Inventory() {
         <table className="w-full min-w-[720px] text-sm">
           <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
             <tr>
-              <th className="p-3">Date</th><th className="p-3">Type</th><th className="p-3">Product</th>
+              <th className="p-3">Date</th><th className="p-3">Direction</th><th className="p-3">Product</th>
               <th className="p-3">Qty</th><th className="p-3">Unit price</th><th className="p-3">Amount</th>
               <th className="p-3">From / To</th><th className="p-3">Ref</th>
             </tr>
@@ -169,12 +184,15 @@ function Inventory() {
                 <td className="p-3 whitespace-nowrap">{shortDate(m.date)}</td>
                 <td className="p-3">
                   {m.type === "in"
-                    ? <span className="inline-flex items-center gap-1 text-green-600 font-medium"><ArrowDownToLine className="h-3.5 w-3.5" /> IN</span>
-                    : <span className="inline-flex items-center gap-1 text-orange-500 font-medium"><ArrowUpFromLine className="h-3.5 w-3.5" /> OUT</span>}
+                    ? <span className="inline-flex items-center gap-1 text-green-600 font-medium"><ArrowDownToLine className="h-3.5 w-3.5" /> In</span>
+                    : <span className="inline-flex items-center gap-1 text-orange-500 font-medium"><ArrowUpFromLine className="h-3.5 w-3.5" /> Out</span>}
                 </td>
                 <td className="p-3 font-medium">{m.product}</td>
+                {/* The direction column says in/out; the quantity is always
+                    the positive number of units moved, never "−3", which
+                    reads as negative stock. */}
                 <td className={`p-3 font-semibold ${m.type === "in" ? "text-green-600" : "text-orange-500"}`}>
-                  {m.type === "in" ? "+" : "−"}{m.qty}
+                  {m.qty}
                 </td>
                 <td className="p-3">{money(m.unit)}</td>
                 <td className="p-3 font-semibold">{money(m.unit * m.qty)}</td>
@@ -201,7 +219,8 @@ function Inventory() {
               <div className="text-lg font-black">{COMPANY.name} — Stock List</div>
               <div className="text-sm">
                 {shortDate(localToday())}
-                {` · all products · ${stockList.length} product${stockList.length === 1 ? "" : "s"} · ${stockListUnits} unit${stockListUnits === 1 ? "" : "s"}`}
+                {` · stocked products · ${stockList.length} product${stockList.length === 1 ? "" : "s"} · ${stockListUnits} unit${stockListUnits === 1 ? "" : "s"}`}
+                {notListed > 0 && ` · ${notListed} service / trade-in item${notListed === 1 ? "" : "s"} not stock-tracked, not listed`}
               </div>
             </div>
             <table className="w-full text-sm">
@@ -222,8 +241,8 @@ function Inventory() {
                     <td className="py-1.5 pr-2">{p.product_name}</td>
                     <td className="py-1.5 pr-2 text-right">{money(p.purchase_price)}</td>
                     <td className="py-1.5 pr-2 text-right">{money(effectivePrice(p))}</td>
-                    <td className="py-1.5 pr-2 text-right font-semibold">{p.quantity_in_stock ?? 0}</td>
-                    <td className="py-1.5 text-right">{money(Number(p.purchase_price ?? 0) * (Number(p.quantity_in_stock) || 0))}</td>
+                    <td className="py-1.5 pr-2 text-right font-semibold">{inStock(p) ? stockOf(p) : "Out of stock"}</td>
+                    <td className="py-1.5 text-right">{money(Number(p.purchase_price ?? 0) * onHand(p))}</td>
                   </tr>
                 ))}
               </tbody>

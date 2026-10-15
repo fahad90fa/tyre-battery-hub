@@ -5,6 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
 import { effectivePrice, inStockFirst } from "@/lib/pricing";
+import { inStock, isTracked, stockOf, stockLabel } from "@/lib/stock";
+import { getOrCreateProduct, confirmStockForSale } from "@/lib/products";
 import { matchesQuery } from "@/lib/search";
 import { printArea } from "@/lib/print";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
@@ -46,7 +48,7 @@ function PosPage() {
 
   const load = async () => {
     const [{ data: p }, { data: c }] = await Promise.all([
-      fetchAll((a, b) => supabase.from("products").select("id, product_name, selling_price, purchase_price, quantity_in_stock").order("product_name").order("id").range(a, b)),
+      fetchAll((a, b) => supabase.from("products").select("id, product_name, selling_price, purchase_price, quantity_in_stock, track_stock").order("product_name").order("id").range(a, b)),
       supabase.from("clients").select("id, name, account_no, current_balance").order("name"),
     ]);
     setProducts(p ?? []); setClients(c ?? []);
@@ -57,12 +59,13 @@ function PosPage() {
   // "Bandalayar 12 Evergreen" and "Evergreen Bandalayar 12" both match.
   // Products with stock come first (alphabetical); out-of-stock ones sink
   // to the very bottom so the sellable items are always in front.
-  // Browsing shows only what can be sold right now; a typed search still
-  // finds out-of-stock products (sorted last) so nothing is ever lost.
+  // Browsing shows only what can be sold right now (untracked services and
+  // trade-ins always can); a typed search still finds out-of-stock products
+  // (sorted last) so nothing is ever lost.
   const [showOutOfStock, setShowOutOfStock] = useState(false);
   const matches = useMemo(() => {
     if (q.trim()) return inStockFirst(products.filter((p) => matchesQuery(p.product_name, q)));
-    return inStockFirst(showOutOfStock ? products : products.filter((p) => (Number(p.quantity_in_stock) || 0) > 0));
+    return inStockFirst(showOutOfStock ? products : products.filter(inStock));
   }, [products, q, showOutOfStock]);
   const filtered = useMemo(() => matches.slice(0, q.trim() ? 60 : 30), [matches, q]);
 
@@ -87,23 +90,36 @@ function PosPage() {
       return [...c, {
         product_id: p.id, name: p.product_name, qty: 1,
         price: effectivePrice(p), cost: p.purchase_price ?? null,
-        stock: p.quantity_in_stock ?? 0,
+        stock: stockOf(p),
       }];
     });
   };
   const setCartLine = (i: number, patch: Partial<CartLine>) =>
     setCart((c) => c.map((l, j) => (j === i ? { ...l, ...patch } : l)));
 
+  // Quick-add from the search box. A name that already exists (any spacing
+  // or case) reuses that product — the shop must never carry two copies.
   const createProduct = async (name: string) => {
-    const { data, error } = await supabase.from("products")
-      .insert({ product_name: name, quantity_in_stock: 0, purchase_price: 0, selling_price: 0 })
-      .select().maybeSingle();
+    const { product, created, error } = await getOrCreateProduct(name);
+    if (error || !product) return toast.error(error ?? "Could not add product");
+    setProducts((ps) => (ps.some((p) => p.id === product.id) ? ps : [...ps, product]));
+    addToCart(product);
+    toast.success(created
+      ? `New product "${product.product_name}" added — set its price in the cart`
+      : `"${product.product_name}" already exists — added it to the cart`);
+  };
+
+  // The typed cart price becomes the product's shop price, so the cashier
+  // stops retyping it on every sale.
+  const saveAsProductPrice = async (line: CartLine) => {
+    const price = Math.round(Number(line.price) || 0);
+    if (!(price > 0)) return toast.error("Enter a price first");
+    const { data, error } = await supabase.from("products").update({ selling_price: price })
+      .eq("id", line.product_id).select("id").maybeSingle();
     if (error) return toast.error(error.message);
-    if (data) {
-      setProducts((ps) => [...ps, data]);
-      addToCart(data);
-      toast.success(`New product "${name}" added — set its price in the cart`);
-    }
+    if (!data) return toast.error("Product not found — refresh the page");
+    setProducts((ps) => ps.map((p) => (p.id === line.product_id ? { ...p, selling_price: price } : p)));
+    toast.success(`${line.name}: shop price saved as ${money(price)}`);
   };
 
   const reset = () => {
@@ -128,6 +144,10 @@ function PosPage() {
 
     setSaving(true);
     try {
+      // Live stock check: the list on screen may be stale (another device
+      // may have sold meanwhile). Selling past zero needs a yes.
+      if (!(await confirmStockForSale(cart.map((l) => ({ product_id: l.product_id, qty: l.qty }))))) return;
+
       const invId = "INV-" + Date.now();
       const { data: inv, error } = await supabase.from("invoices").insert({
         invoice_id: invId, customer_name: name, total_amount: total,
@@ -156,18 +176,8 @@ function PosPage() {
         );
       }
 
-      // Stock out — aggregate per product (same product can't repeat in cart,
-      // but keep it safe) and decrement.
-      const deltas = new Map<string, number>();
-      cart.forEach((l) => deltas.set(l.product_id, (deltas.get(l.product_id) ?? 0) + l.qty));
-      for (const [pid, qty] of deltas) {
-        const prod = products.find((p) => p.id === pid);
-        if (prod) {
-          await supabase.from("products").update({
-            quantity_in_stock: Math.max(0, prod.quantity_in_stock - qty),
-          }).eq("id", pid);
-        }
-      }
+      // Stock: the invoice_items trigger has already taken the sold units
+      // off products.quantity_in_stock — nothing to write here.
 
       // Per-item sale rows feed the dashboard/reports — never fail silently.
       const { error: cpErr } = await supabase.from("customer_purchases").insert(cart.map((l) => ({
@@ -208,33 +218,37 @@ function PosPage() {
     }
   };
 
-  const stockUnits = matches.reduce((a, p) => a + (Number(p.quantity_in_stock) || 0), 0);
+  const stockUnits = matches.reduce((a, p) => a + (isTracked(p) ? Math.max(0, stockOf(p)) : 0), 0);
   // The printed sheet ignores the browse toggle: with no search it lists
   // every product, zero-stock lines included — a stock-take needs those.
   const printList = useMemo(
     () => (q.trim() ? products.filter((p) => matchesQuery(p.product_name, q)) : products),
     [products, q],
   );
-  const printUnits = printList.reduce((a, p) => a + (Number(p.quantity_in_stock) || 0), 0);
+  const printUnits = printList.reduce((a, p) => a + (isTracked(p) ? Math.max(0, stockOf(p)) : 0), 0);
 
   return (
     <AdminShell title="Quick Sale (POS)">
       <div className="grid lg:grid-cols-5 gap-4">
         {/* Product picker */}
         <div className="lg:col-span-3 rounded-2xl bg-card p-4 shadow-sm">
-          <div className="flex gap-2 mb-3">
-            <div className="relative flex-1">
+          {/* Search gets a full row of its own on every screen size; the
+              toggles sit below so the box is never squeezed on a phone. */}
+          <div className="space-y-2 mb-3">
+            <div className="relative w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input autoFocus placeholder="Search product... (any word order)" value={q} onChange={(e) => setQ(e.target.value)} className="pl-9 h-11" />
+              <Input autoFocus placeholder="Search product... (any word order)" value={q} onChange={(e) => setQ(e.target.value)} className="pl-9 h-11 w-full" />
             </div>
-            <Button variant={showOutOfStock ? "secondary" : "outline"} className="h-11" onClick={() => setShowOutOfStock((v) => !v)}
-                    title="Browse out-of-stock products too (a search always finds them)">
-              {showOutOfStock ? "Hide out of stock" : "Show out of stock"}
-            </Button>
-            <Button variant="outline" className="h-11" onClick={() => setStockPrint(true)}
-                    title="Print the stock list currently matching the search">
-              <Printer className="h-4 w-4 mr-2" /> Print stock list
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant={showOutOfStock ? "secondary" : "outline"} size="sm" onClick={() => setShowOutOfStock((v) => !v)}
+                      title="Browse out-of-stock products too (a search always finds them)">
+                {showOutOfStock ? "Hide out of stock" : "Show out of stock"}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setStockPrint(true)}
+                      title="Print the stock list currently matching the search">
+                <Printer className="h-4 w-4 mr-2" /> Print stock list
+              </Button>
+            </div>
           </div>
           {q.trim() && (
             <div className="mb-2 text-xs text-muted-foreground">
@@ -247,10 +261,16 @@ function PosPage() {
               <button key={p.id} onClick={() => addToCart(p)}
                       className="rounded-xl border p-3 text-left hover:border-primary hover:bg-primary/5 transition-colors">
                 <div className="text-sm font-medium leading-tight line-clamp-2">{p.product_name}</div>
-                <div className="mt-1 flex items-center justify-between text-xs">
-                  <span className="font-semibold text-primary">{money(effectivePrice(p))}</span>
-                  <span className={p.quantity_in_stock > 0 ? "text-muted-foreground" : "text-destructive"}>
-                    {p.quantity_in_stock > 0 ? `${p.quantity_in_stock} left` : "no stock"}
+                <div className="mt-1 flex items-center justify-between gap-2 text-xs">
+                  <span className="font-semibold text-primary">
+                    {money(effectivePrice(p))}
+                    {/* No shop price yet — the tile shows the merchant cost. */}
+                    {!(Number(p.selling_price) > 0) && effectivePrice(p) > 0 && (
+                      <span className="ml-1 text-[10px] font-normal text-muted-foreground" title="No selling price set — showing the merchant cost">cost</span>
+                    )}
+                  </span>
+                  <span className={inStock(p) ? "text-muted-foreground" : "text-destructive"}>
+                    {stockLabel(p)}
                   </span>
                 </div>
               </button>
@@ -310,6 +330,19 @@ function PosPage() {
                              onChange={(e) => setCartLine(i, { price: Number(e.target.value) })} />
                     </div>
                   </div>
+                  {(() => {
+                    const prod = products.find((p) => p.id === l.product_id);
+                    const saved = Math.round(Number(prod?.selling_price) || 0);
+                    const typed = Math.round(Number(l.price) || 0);
+                    if (!prod || !(typed > 0) || typed === saved) return null;
+                    return (
+                      <button type="button" onClick={() => saveAsProductPrice(l)}
+                              className="mt-1.5 text-[11px] text-primary underline-offset-2 hover:underline"
+                              title={saved > 0 ? `Product price is ${money(saved)} — make ${money(typed)} the new shop price` : "This product has no shop price yet"}>
+                        Save {money(typed)} as product price
+                      </button>
+                    );
+                  })()}
                   <div className="mt-2 flex items-center justify-between">
                     <div className="text-[11px] text-muted-foreground">Line total</div>
                     <div className="text-sm font-bold">{money(l.qty * l.price)}</div>
@@ -460,7 +493,7 @@ function PosPage() {
                     <td className="py-1.5 pr-2">{i + 1}</td>
                     <td className="py-1.5 pr-2">{p.product_name}</td>
                     <td className="py-1.5 pr-2 text-right">{money(effectivePrice(p))}</td>
-                    <td className="py-1.5 text-right font-semibold">{p.quantity_in_stock ?? 0}</td>
+                    <td className="py-1.5 text-right font-semibold">{!isTracked(p) ? "—" : stockOf(p) > 0 ? stockOf(p) : "Out of stock"}</td>
                   </tr>
                 ))}
               </tbody>

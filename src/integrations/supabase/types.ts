@@ -735,6 +735,7 @@ export type Database = {
           quantity_in_stock: number
           selling_price: number
           subcategory_id: string | null
+          track_stock: boolean
         }
         Insert: {
           brand_id?: string | null
@@ -752,6 +753,7 @@ export type Database = {
           quantity_in_stock?: number
           selling_price?: number
           subcategory_id?: string | null
+          track_stock?: boolean
         }
         Update: {
           brand_id?: string | null
@@ -769,6 +771,7 @@ export type Database = {
           quantity_in_stock?: number
           selling_price?: number
           subcategory_id?: string | null
+          track_stock?: boolean
         }
         Relationships: [
           {
@@ -853,6 +856,41 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      stock_adjustments: {
+        Row: {
+          created_at: string
+          delta: number
+          id: string
+          note: string | null
+          product_id: string
+          reason: string
+        }
+        Insert: {
+          created_at?: string
+          delta: number
+          id?: string
+          note?: string | null
+          product_id: string
+          reason?: string
+        }
+        Update: {
+          created_at?: string
+          delta?: number
+          id?: string
+          note?: string | null
+          product_id?: string
+          reason?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_adjustments_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       stock_purchases: {
         Row: {

@@ -3,8 +3,10 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money, localToday } from "@/lib/format";
+import { money, localToday, localDateOf } from "@/lib/format";
 import { methodLabel } from "@/lib/payments";
+import { normalizeProductName } from "@/lib/pricing";
+import { isTracked, stockOf } from "@/lib/stock";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell, Legend,
@@ -34,11 +36,10 @@ function CountUp({ n, prefix = "" }: { n: number; prefix?: string }) {
 
 function Dashboard() {
   const [stats, setStats] = useState({
-    stockValue: 0, todaySales: 0, expenses: 0, profit: 0, outOfStock: 0,
+    stockValue: 0, todaySales: 0, totalRev: 0, expenses: 0, profit: 0, outOfStock: 0,
     templates: 0, products: 0, stockUnits: 0, employees: 0, merchants: 0, clients: 0,
   });
   const [stockByCat, setStockByCat] = useState<any[]>([]);
-  const [salesTrend, setSalesTrend] = useState<any[]>([]);
   const [topSold, setTopSold] = useState<any[]>([]);
   const [dailyFlow, setDailyFlow] = useState<any[]>([]);
   const [todayStats, setTodayStats] = useState({ received: 0, sales: 0, expenses: 0 });
@@ -59,7 +60,7 @@ function Dashboard() {
         { count: merCount },
         { count: cliCount },
       ] = await Promise.all([
-        fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price, selling_price, category_id").order("id").range(a, b)),
+        fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock, track_stock, purchase_price, selling_price, category_id").order("id").range(a, b)),
         fetchAll((a, b) => supabase.from("customer_purchases").select("id, total_price, purchase_date, product_id, quantity_purchased").order("id").range(a, b)),
         fetchAll((a, b) => supabase.from("expenses").select("id, amount, date_of_expense").order("id").range(a, b)),
         supabase.from("categories").select("id, name"),
@@ -93,10 +94,12 @@ function Dashboard() {
         expenses: (expenses ?? []).filter((x) => x.date_of_expense === today).reduce((a, x) => a + Number(x.amount), 0),
       });
 
-      // Last 14 days: received vs sales vs expenses
+      // Last 14 days: received, sales and expenses per day. Local dates,
+      // like every date column and localToday() — toISOString() is UTC and
+      // put the window a day off before 5 AM Pakistan time.
       const days: string[] = Array.from({ length: 14 }, (_, i) => {
         const d = new Date(); d.setDate(d.getDate() - (13 - i));
-        return d.toISOString().slice(0, 10);
+        return localDateOf(d);
       });
       setDailyFlow(days.map((d) => ({
         date: d.slice(5),
@@ -105,31 +108,45 @@ function Dashboard() {
         expenses: (expenses ?? []).filter((x) => x.date_of_expense === d).reduce((a, x) => a + Number(x.amount), 0),
       })));
       const p = products ?? [], s = sales ?? [], e = expenses ?? [], c = cats ?? [];
-      const stockValue = p.reduce((a, x) => a + Number(x.purchase_price) * x.quantity_in_stock, 0);
-      const stockUnits = p.reduce((a, x) => a + x.quantity_in_stock, 0);
+      // Units on hand: stock-tracked products with a positive count. Services
+      // and trade-ins are never stock, and a tracked product sold before its
+      // purchase was booked sits below zero in the database — that is "out of
+      // stock", never a negative unit count or a negative value.
+      const onHand = (x: { quantity_in_stock: number; track_stock: boolean }) => (isTracked(x) && stockOf(x) > 0 ? stockOf(x) : 0);
+      const stockValue = p.reduce((a, x) => a + Number(x.purchase_price) * onHand(x), 0);
+      const stockUnits = p.reduce((a, x) => a + onHand(x), 0);
       const todaySales = s.filter((x) => x.purchase_date === today).reduce((a, x) => a + Number(x.total_price), 0);
       const totalExp = e.reduce((a, x) => a + Number(x.amount), 0);
       const totalRev = s.reduce((a, x) => a + Number(x.total_price), 0);
-      const outOfStock = p.filter((x) => x.quantity_in_stock <= 0).length;
+      const outOfStock = p.filter((x) => isTracked(x) && stockOf(x) <= 0).length;
       setStats({
-        stockValue, todaySales, expenses: totalExp, profit: totalRev - totalExp, outOfStock,
+        stockValue, todaySales, totalRev, expenses: totalExp, profit: totalRev - totalExp, outOfStock,
         templates: tplCount ?? 0, products: p.length, stockUnits,
         employees: empCount ?? 0, merchants: merCount ?? 0, clients: cliCount ?? 0,
       });
 
-      setStockByCat(c.map((cat) => ({
-        name: cat.name,
-        stock: p.filter((x) => x.category_id === cat.id).reduce((a, x) => a + x.quantity_in_stock, 0),
-      })).filter((x) => x.stock > 0));
+      // Most products carry no category; they used to vanish from this chart.
+      const catIds = new Set(c.map((cat) => cat.id));
+      const uncategorised = p.filter((x) => !x.category_id || !catIds.has(x.category_id)).reduce((a, x) => a + onHand(x), 0);
+      setStockByCat([
+        ...c.map((cat) => ({
+          name: cat.name,
+          stock: p.filter((x) => x.category_id === cat.id).reduce((a, x) => a + onHand(x), 0),
+        })),
+        { name: "Uncategorised", stock: uncategorised },
+      ].filter((x) => x.stock > 0));
 
-      const byDay: Record<string, number> = {};
-      s.forEach((x) => { byDay[x.purchase_date] = (byDay[x.purchase_date] ?? 0) + Number(x.total_price); });
-      setSalesTrend(Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b)).slice(-14).map(([d, v]) => ({ date: d.slice(5), sales: v })));
-
-      const bySales: Record<string, number> = {};
-      s.forEach((x) => { if (x.product_id) bySales[x.product_id] = (bySales[x.product_id] ?? 0) + x.quantity_purchased; });
+      // Top sellers by product NAME (normalised), so two product rows that
+      // spell the same tyre differently are one slice, not two legend twins.
       const nameMap = Object.fromEntries(p.map((x) => [x.id, x.product_name]));
-      setTopSold(Object.entries(bySales).sort((a,b) => b[1]-a[1]).slice(0,5).map(([id, qty]) => ({ name: nameMap[id] ?? "—", value: qty })));
+      const byName: Record<string, { name: string; value: number }> = {};
+      s.forEach((x) => {
+        const name = x.product_id ? nameMap[x.product_id] : undefined;
+        if (!name) return;
+        const key = normalizeProductName(name);
+        byName[key] = { name: byName[key]?.name ?? name, value: (byName[key]?.value ?? 0) + (Number(x.quantity_purchased) || 0) };
+      });
+      setTopSold(Object.values(byName).sort((a, b) => b.value - a.value).slice(0, 5));
     })();
   }, []);
 
@@ -219,35 +236,22 @@ function Dashboard() {
         </div>
       </div>
 
-      <div className="mt-4">
-        <Chart title="Daily money flow — payments received vs sales vs expenses (14 days)">
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={dailyFlow}>
-              <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-              <XAxis dataKey="date" fontSize={11} />
-              <YAxis fontSize={11} />
-              <Tooltip formatter={(v: any) => money(v)} />
-              <Legend />
-              <Line type="monotone" dataKey="received" name="Received" stroke="#10B981" strokeWidth={2} dot={{ r: 2 }} />
-              <Line type="monotone" dataKey="sales" name="Sales" stroke="#2563EB" strokeWidth={2} dot={{ r: 2 }} />
-              <Line type="monotone" dataKey="expenses" name="Expenses" stroke="#EF4444" strokeWidth={2} dot={{ r: 2 }} />
-            </LineChart>
-          </ResponsiveContainer>
+      {/* One graph per series. Drawn together, received and sales are the
+          same magnitude and cross each other while expenses hug the floor —
+          on a phone that is one tangle, not three graphs. */}
+      <div className="grid md:grid-cols-3 gap-4 mt-6">
+        <Chart title="Payments received (14 days)">
+          <Trend data={dailyFlow} dataKey="received" name="Received" color="#10B981" />
+        </Chart>
+        <Chart title="Sales (14 days)">
+          <Trend data={dailyFlow} dataKey="sales" name="Sales" color="#2563EB" />
+        </Chart>
+        <Chart title="Expenses (14 days)">
+          <Trend data={dailyFlow} dataKey="expenses" name="Expenses" color="#EF4444" />
         </Chart>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4 mt-6">
-        <Chart title="Sales trend (last 14 days)">
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={salesTrend}>
-              <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-              <XAxis dataKey="date" fontSize={12} />
-              <YAxis fontSize={12} />
-              <Tooltip formatter={(v: any) => money(v)} />
-              <Line type="monotone" dataKey="sales" stroke="#2563EB" strokeWidth={2} dot={{ r: 3 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </Chart>
         <Chart title="In-stock by category">
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={stockByCat}>
@@ -262,7 +266,7 @@ function Dashboard() {
         <Chart title="Top-selling products">
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
-              <Pie data={topSold} dataKey="value" nameKey="name" outerRadius={90} label>
+              <Pie data={topSold} dataKey="value" nameKey="name" cy="42%" outerRadius={80} label>
                 {topSold.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
               </Pie>
               <Tooltip />
@@ -273,7 +277,7 @@ function Dashboard() {
         <Chart title="Expenses vs Revenue">
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={[
-              { name: "Revenue", value: stats.todaySales + stats.profit + stats.expenses },
+              { name: "Revenue", value: stats.totalRev },
               { name: "Expenses", value: stats.expenses },
               { name: "Profit", value: stats.profit },
             ]}>
@@ -292,9 +296,24 @@ function Dashboard() {
 
 function Chart({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl bg-card p-5 shadow-sm">
+    <div className="rounded-2xl bg-card p-5 shadow-sm min-w-0">
       <div className="font-semibold mb-4">{title}</div>
       {children}
     </div>
+  );
+}
+
+/** One 14-day series on its own axes. */
+function Trend({ data, dataKey, name, color }: { data: any[]; dataKey: string; name: string; color: string }) {
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <LineChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+        <XAxis dataKey="date" fontSize={11} />
+        <YAxis fontSize={11} width={52} />
+        <Tooltip formatter={(v: any) => money(v)} />
+        <Line type="monotone" dataKey={dataKey} name={name} stroke={color} strokeWidth={2} dot={{ r: 2 }} />
+      </LineChart>
+    </ResponsiveContainer>
   );
 }
