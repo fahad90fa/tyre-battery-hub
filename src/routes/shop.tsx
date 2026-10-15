@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteShell } from "@/components/site/SiteShell";
 import { money } from "@/lib/format";
-import { inStockFirst } from "@/lib/pricing";
+import { inStock, isTracked } from "@/lib/stock";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -24,10 +24,18 @@ export const Route = createFileRoute("/shop")({
 
 type Product = {
   id: string; product_name: string; image_url: string | null;
-  selling_price: number; quantity_in_stock: number;
+  selling_price: number; quantity_in_stock: number; track_stock: boolean;
   category_id: string | null; brand_id: string | null;
   created_at: string | null;
 };
+
+/**
+ * What the website may show: a stock-tracked product with units on hand
+ * and a selling price. Services/trade-ins (not tracked), anything out of
+ * stock and unpriced products never appear on the shop. The query already
+ * filters on these; the guard also runs here so a stale row can't slip in.
+ */
+const showable = (p: Product) => isTracked(p) && inStock(p) && Number(p.selling_price) > 0;
 
 function Shop() {
   const [products, setProducts] = useState<Product[] | null>(null);
@@ -40,7 +48,9 @@ function Shop() {
   useEffect(() => {
     (async () => {
       const [{ data: p }, { data: c }, { data: b }] = await Promise.all([
-        fetchAll((a, b) => supabase.from("products").select("*").order("created_at", { ascending: false }).order("id").range(a, b)),
+        fetchAll((a, b) => supabase.from("products").select("*")
+          .eq("track_stock", true).gt("quantity_in_stock", 0).gt("selling_price", 0)
+          .order("created_at", { ascending: false }).order("id").range(a, b)),
         supabase.from("categories").select("id, name").order("display_order"),
         supabase.from("brands").select("id, name").order("name"),
       ]);
@@ -50,16 +60,16 @@ function Shop() {
     })();
   }, []);
 
-  // In-stock products lead, out-of-stock close the list; newest first
-  // within each group (the order this catalog always used).
-  const filtered = inStockFirst(
-    (products ?? []).filter((p) =>
+  // Only sellable products are listed (see `showable`); newest first, the
+  // order this catalog always used.
+  const filtered = (products ?? [])
+    .filter((p) =>
+      showable(p) &&
       (cat === "all" || p.category_id === cat) &&
       (brand === "all" || p.brand_id === brand) &&
       (q === "" || p.product_name.toLowerCase().includes(q.toLowerCase()))
-    ),
-    (a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""),
-  );
+    )
+    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
 
   return (
     <SiteShell>
@@ -113,8 +123,8 @@ function Shop() {
                   <div className="font-semibold truncate">{p.product_name}</div>
                   <div className="flex items-center justify-between mt-2">
                     <span className="text-primary font-bold">{money(p.selling_price)}</span>
-                    <span className={`text-xs ${p.quantity_in_stock > 0 ? "text-green-600" : "text-destructive"}`}>
-                      {p.quantity_in_stock > 0 ? "In stock" : "Out of stock"}
+                    <span className={`text-xs ${inStock(p) ? "text-green-600" : "text-destructive"}`}>
+                      {inStock(p) ? "In stock" : "Out of stock"}
                     </span>
                   </div>
                 </div>

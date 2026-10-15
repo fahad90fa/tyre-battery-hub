@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money } from "@/lib/format";
+import { isTracked, stockOf, oversold } from "@/lib/stock";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, Legend,
@@ -36,7 +37,7 @@ function Reports() {
         fetchAll((a, b) => supabase.from("invoice_payments").select("id, amount, method, payment_date, invoices(client_id)").order("id").range(a, b)),
         fetchAll((a, b) => supabase.from("client_ledger").select("id, amount, method, entry_date, reference").eq("entry_type", "payment").order("id").range(a, b)),
         fetchAll((a, b) => supabase.from("expenses").select("id, amount, date_of_expense").order("id").range(a, b)),
-        fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock").order("id").range(a, b)),
+        fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock, track_stock").order("id").range(a, b)),
       ]);
       setSales(s ?? []); setPayments(ip ?? []); setLedgerPays(lp ?? []);
       setExpenses(ex ?? []); setProducts(p ?? []);
@@ -97,7 +98,9 @@ function Reports() {
   const bySales: Record<string, number> = {};
   mSales.forEach((s) => { const n = s.products?.product_name ?? "—"; bySales[n] = (bySales[n] ?? 0) + s.quantity_purchased; });
   const most = Object.entries(bySales).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, qty]) => ({ name, qty }));
-  const outStock = products.filter((p) => p.quantity_in_stock <= 0);
+  // Services and trade-ins are not stock-tracked, so they can't be out of
+  // stock; a tracked product at or below zero is.
+  const outStock = products.filter((p) => isTracked(p) && stockOf(p) <= 0);
 
   return (
     <AdminShell title="Monthly Reports">
@@ -169,7 +172,12 @@ function Reports() {
         <Card title="Out-of-stock products">
           <ul className="text-sm space-y-1 max-h-64 overflow-y-auto">
             {outStock.length === 0 ? <li className="text-muted-foreground">All products in stock.</li> :
-              outStock.map((p) => <li key={p.id} className="flex justify-between border-b py-1"><span>{p.product_name}</span><span className="text-destructive">0</span></li>)}
+              outStock.map((p) => (
+                <li key={p.id} className="flex justify-between border-b py-1">
+                  <span>{p.product_name}</span>
+                  <span className="text-destructive">Out of stock{oversold(p) > 0 && ` · ${oversold(p)} oversold`}</span>
+                </li>
+              ))}
           </ul>
         </Card>
         <Card title={`Summary — ${monthName(month)}`}>
