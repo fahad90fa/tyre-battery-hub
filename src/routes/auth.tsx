@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Wrench, Mail, Lock, User, Sparkles, ShieldCheck, Truck, Zap } from "lucide-react";
+import { Wrench, Mail, Lock, User, Sparkles, ShieldCheck, Truck, Zap, ArrowLeft } from "lucide-react";
 import { COMPANY } from "@/lib/company";
 
 
@@ -24,12 +24,81 @@ function AuthPage() {
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<"signin" | "signup">("signin");
+  // "forgot": ask for the email to send a reset link to.
+  // "reset": arrived from that link (signed in for recovery) — set a new password.
+  const [mode, setMode] = useState<"auth" | "forgot" | "reset">("auth");
+  const [newPw, setNewPw] = useState({ next: "", confirm: "" });
+  const [recoveryEmail, setRecoveryEmail] = useState("");
 
   useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const wantsReset = query.get("reset") === "1" || hash.get("type") === "recovery";
+    const linkError = hash.get("error_description") ?? query.get("error_description");
+
+    // The reset link signs the user in for recovery; Supabase announces it
+    // with PASSWORD_RECOVERY (whichever page it lands on first).
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setMode("reset");
+        setRecoveryEmail(session?.user.email ?? "");
+      }
+    });
+
     supabase.auth.getSession().then(({ data }) => {
+      if (wantsReset) {
+        if (data.session) {
+          setMode("reset");
+          setRecoveryEmail(data.session.user.email ?? "");
+        } else {
+          setMode("forgot");
+          toast.error(linkError ?? "This password reset link is invalid or has expired. Request a new one below.");
+        }
+        return;
+      }
       if (data.session) navigate({ to: "/" });
     });
+    return () => sub.subscription.unsubscribe();
   }, [navigate]);
+
+  const sendReset = async () => {
+    const target = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) return toast.error("Enter the email you sign in with");
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(target, {
+        redirectTo: `${window.location.origin}/auth?reset=1`,
+      });
+      if (error) return toast.error(error.message);
+      toast.success("Reset link sent", {
+        description: `If an account exists for ${target}, an email with a reset link is on its way. Check spam too.`,
+        duration: 10000,
+      });
+      setMode("auth");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not reach the server. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveNewPassword = async () => {
+    if (newPw.next.length < 8) return toast.error("Password must be at least 8 characters");
+    if (newPw.next !== newPw.confirm) return toast.error("Passwords do not match");
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPw.next });
+      if (error) return toast.error(error.message);
+      toast.success("Password updated — you're signed in");
+      setNewPw({ next: "", confirm: "" });
+      setMode("auth");
+      navigate({ to: "/" });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not reach the server. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const signIn = async () => {
     setLoading(true);
@@ -221,18 +290,49 @@ function AuthPage() {
           <div className="bg-card border rounded-2xl shadow-xl p-8">
             <div className="text-center mb-6">
               <motion.h2
-                key={tab}
+                key={mode === "auth" ? tab : mode}
                 initial={{ opacity: 0, y: -8 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="text-2xl font-bold tracking-tight"
               >
-                {tab === "signin" ? "Welcome back 👋" : `Join ${COMPANY.name}`}
+                {mode === "forgot" ? "Reset your password"
+                  : mode === "reset" ? "Set a new password"
+                  : tab === "signin" ? "Welcome back 👋" : `Join ${COMPANY.name}`}
               </motion.h2>
               <p className="text-sm text-muted-foreground mt-1">
-                {tab === "signin" ? "Sign in to continue to your dashboard" : "Create your account in seconds"}
+                {mode === "forgot" ? "We'll email you a link to choose a new password"
+                  : mode === "reset" ? (recoveryEmail ? `For ${recoveryEmail}` : "Choose a new password for your account")
+                  : tab === "signin" ? "Sign in to continue to your dashboard" : "Create your account in seconds"}
               </p>
             </div>
 
+            {mode === "forgot" ? (
+              <div className="space-y-4">
+                <IconField label="Email" icon={Mail}>
+                  <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="you@example.com" className="pl-10 h-11"
+                         onKeyDown={(e) => { if (e.key === "Enter") void sendReset(); }} />
+                </IconField>
+                <Button className="w-full h-11 font-semibold" onClick={sendReset} disabled={loading}>
+                  {loading ? "Sending..." : "Send reset link"}
+                </Button>
+                <Button variant="ghost" className="w-full" onClick={() => setMode("auth")}>
+                  <ArrowLeft className="h-4 w-4 mr-2" /> Back to sign in
+                </Button>
+              </div>
+            ) : mode === "reset" ? (
+              <div className="space-y-4">
+                <IconField label="New password" icon={Lock}>
+                  <Input value={newPw.next} onChange={(e) => setNewPw({ ...newPw, next: e.target.value })} type="password" autoComplete="new-password" placeholder="At least 8 characters" className="pl-10 h-11" />
+                </IconField>
+                <IconField label="Confirm new password" icon={Lock}>
+                  <Input value={newPw.confirm} onChange={(e) => setNewPw({ ...newPw, confirm: e.target.value })} type="password" autoComplete="new-password" placeholder="Type it again" className="pl-10 h-11"
+                         onKeyDown={(e) => { if (e.key === "Enter") void saveNewPassword(); }} />
+                </IconField>
+                <Button className="w-full h-11 font-semibold" onClick={saveNewPassword} disabled={loading}>
+                  {loading ? "Saving..." : "Save new password"}
+                </Button>
+              </div>
+            ) : (<>
             <Tabs value={tab} onValueChange={(v) => setTab(v as "signin" | "signup")}>
               <TabsList className="grid grid-cols-2 w-full">
                 <TabsTrigger value="signin">Sign in</TabsTrigger>
@@ -255,6 +355,11 @@ function AuthPage() {
                       <IconField label="Password" icon={Lock}>
                         <Input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="••••••••" className="pl-10 h-11" />
                       </IconField>
+                      <div className="-mt-2 text-right">
+                        <button type="button" className="text-xs font-medium text-primary hover:underline" onClick={() => setMode("forgot")}>
+                          Forgot password?
+                        </button>
+                      </div>
                       <motion.div whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}>
                         <Button className="w-full h-11 font-semibold" onClick={signIn} disabled={loading}>
                           {loading ? "Signing in..." : "Sign in"}
@@ -304,6 +409,7 @@ function AuthPage() {
                 Continue with Google
               </Button>
             </motion.div>
+            </>)}
 
             <p className="mt-6 text-center text-xs text-muted-foreground">
               By continuing you agree to our terms & privacy policy.

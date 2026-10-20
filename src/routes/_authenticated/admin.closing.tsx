@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Lock, Printer, TrendingUp, TrendingDown, Wallet, HandCoins, Banknote, CreditCard } from "lucide-react";
 import { COMPANY } from "@/lib/company";
+import { InvoiceQuickView, InvoiceRefLink } from "@/components/admin/InvoiceQuickView";
 
 export const Route = createFileRoute("/_authenticated/admin/closing")({
   component: DailyClosing,
@@ -37,6 +38,8 @@ function DailyClosing() {
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState("");
+  // Invoice slip opened from a clickable invoice number in the report.
+  const [viewInvoice, setViewInvoice] = useState<string | null>(null);
 
   const load = async () => {
     // Only the chosen day's invoices — fetching the whole table risked the
@@ -228,14 +231,14 @@ function DailyClosing() {
           <Card title={`Sales (${invoices.length})`}>
             {invoices.length === 0 ? <Empty /> : invoices.map((i) => (
               <Row key={i.id}
-                   left={<>{i.customer_name}<div className="text-[10px] text-muted-foreground font-mono">{i.invoice_id}</div></>}
+                   left={<>{i.customer_name}<div className="text-[10px] text-muted-foreground font-mono"><InvoiceRefLink value={i.invoice_id} known onOpen={setViewInvoice} /></div></>}
                    right={<span>{money(i.total_amount)}</span>} />
             ))}
           </Card>
           <Card title={`Payments received (${t.allIn.length})`}>
             {t.allIn.length === 0 ? <Empty /> : t.allIn.map((p, i) => (
               <Row key={i}
-                   left={<>{p.who ?? "Walk-in"}<div className="text-[10px] text-muted-foreground">{methodLabel(p.method)}{p.ref ? ` · ${p.ref}` : ""}{p.isRecovery ? " · recovery of an older bill" : " · today's sale"}</div></>}
+                   left={<>{p.who ?? "Walk-in"}<div className="text-[10px] text-muted-foreground">{methodLabel(p.method)}{p.ref ? <> · <InvoiceRefLink value={p.ref} onOpen={setViewInvoice} /></> : ""}{p.isRecovery ? " · recovery of an older bill" : " · today's sale"}</div></>}
                    right={<span className="text-green-600">{money(p.amount)}</span>} />
             ))}
           </Card>
@@ -246,7 +249,7 @@ function DailyClosing() {
               <>
                 {t.recoveryRows.map((r, i) => (
                   <Row key={i}
-                       left={<>{r.who ?? "Customer"}<div className="text-[10px] text-muted-foreground">{methodLabel(r.method)}{r.ref ? ` · ${r.ref}` : ""} · {shortDate(date)}</div></>}
+                       left={<>{r.who ?? "Customer"}<div className="text-[10px] text-muted-foreground">{methodLabel(r.method)}{r.ref ? <> · <InvoiceRefLink value={r.ref} onOpen={setViewInvoice} /></> : ""} · {shortDate(date)}</div></>}
                        right={<span className="text-green-600">{money(r.amount)}</span>} />
                 ))}
                 <div className="pt-2">
@@ -327,6 +330,9 @@ function DailyClosing() {
           </table>
         </div>
       </div>
+
+      {/* Outside the report's .print-area; its own print button prints the slip. */}
+      <InvoiceQuickView invoiceRef={viewInvoice} onClose={() => setViewInvoice(null)} />
     </AdminShell>
   );
 }

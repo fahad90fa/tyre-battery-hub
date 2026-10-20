@@ -5,8 +5,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
 import { effectivePrice, inStockFirst, toPaisa } from "@/lib/pricing";
-import { stockLabel } from "@/lib/stock";
+import { productOption } from "@/lib/stock";
 import { getOrCreateProduct, confirmStockForSale } from "@/lib/products";
+import { InvoiceQuickView } from "@/components/admin/InvoiceQuickView";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,6 +40,8 @@ function CustomersAdmin() {
   const [form, setForm] = useState<any>(emptyForm);
   const [payLines, setPayLines] = useState<PayLine[]>([{ method: "cash", amount: 0 }]);
   const [saving, setSaving] = useState(false);
+  // Invoice slip shown right after a sale, as POS does.
+  const [viewInvoice, setViewInvoice] = useState<string | null>(null);
 
   const load = async () => {
     const [{ data: r }, { data: p }, { data: c }] = await Promise.all([
@@ -134,6 +137,7 @@ function CustomersAdmin() {
           ? `Sale recorded — ${money(remaining)} udhar added to account (${invId})`
           : `Sale recorded + invoice ${invId}`,
       );
+      if (inv) setViewInvoice(invId);
       setForm(emptyForm);
       setPayLines([{ method: "cash", amount: 0 }]);
       load();
@@ -171,10 +175,7 @@ function CustomersAdmin() {
           </div>
           <div className="space-y-1.5"><Label>Product</Label>
             <SearchableSelect
-              options={inStockFirst(products).map((p) => ({
-                value: p.id, label: p.product_name,
-                hint: `${money(effectivePrice(p))} · ${stockLabel(p)}`,
-              }))}
+              options={inStockFirst(products).map((p) => productOption(p, money(effectivePrice(p))))}
               value={form.product_id}
               onValueChange={(v) => {
                 const p = products.find((x) => x.id === v);
@@ -270,6 +271,7 @@ function CustomersAdmin() {
           </Tabs>
         </div>
       </div>
+      <InvoiceQuickView invoiceRef={viewInvoice} onClose={() => setViewInvoice(null)} />
     </AdminShell>
   );
 }

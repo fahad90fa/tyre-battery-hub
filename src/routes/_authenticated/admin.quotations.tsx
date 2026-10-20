@@ -5,9 +5,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { printArea } from "@/lib/print";
 import { money, shortDate, localToday } from "@/lib/format";
 import { effectivePrice, inStockFirst } from "@/lib/pricing";
-import { stockLabel } from "@/lib/stock";
+import { productOption } from "@/lib/stock";
 import { confirmStockForSale } from "@/lib/products";
 import { Letterhead } from "@/components/admin/Letterhead";
+import { InvoiceQuickView } from "@/components/admin/InvoiceQuickView";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +37,8 @@ function QuotationsAdmin() {
   const [builderOpen, setBuilderOpen] = useState(false);
   const [viewing, setViewing] = useState<any>(null);
   const [viewItems, setViewItems] = useState<any[]>([]);
+  // Invoice slip shown right after a quotation is converted, as POS does.
+  const [viewInvoice, setViewInvoice] = useState<string | null>(null);
 
   // builder state
   const [customerName, setCustomerName] = useState("");
@@ -194,6 +197,7 @@ function QuotationsAdmin() {
 
     toast.success(`Invoice ${invId} created from ${viewing.quote_no}`);
     setViewing({ ...viewing, status: "converted" });
+    setViewInvoice(invId);
     load();
   };
 
@@ -279,7 +283,7 @@ function QuotationsAdmin() {
                   <div className="flex gap-1.5 items-center">
                     <div className="flex-1 min-w-0">
                       <SearchableSelect
-                        options={inStockFirst(products).map((p) => ({ value: p.id, label: p.product_name, hint: `${money(effectivePrice(p))} · ${stockLabel(p)}` }))}
+                        options={inStockFirst(products).map((p) => productOption(p, money(effectivePrice(p))))}
                         value={l.product_id}
                         onValueChange={(v) => {
                           const p = products.find((x) => x.id === v);
@@ -403,6 +407,8 @@ function QuotationsAdmin() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <InvoiceQuickView invoiceRef={viewInvoice} onClose={() => setViewInvoice(null)} />
     </AdminShell>
   );
 }

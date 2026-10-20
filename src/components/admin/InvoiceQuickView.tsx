@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Children, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { printArea } from "@/lib/print";
 import { money, shortDate } from "@/lib/format";
@@ -22,13 +22,30 @@ const CATEGORIES = [
   { icon: Sparkles, label: "Car Care" },
 ];
 
+export type InvoiceLoaded = { invoice: any; items: any[]; payments: any[]; client: any | null };
+
 /**
- * Read-only invoice detail popup, opened from ledger entries / pending
- * invoice lists. Looks the invoice up by its human reference (INV-...).
+ * The one invoice slip of the app — POS, the customer ledger, the Invoices
+ * section and every clickable invoice reference open this same popup.
+ * Looks the invoice up by its row id (`invoiceId`) when given, otherwise by
+ * its human reference (INV-...). Always reads the live rows, so it shows the
+ * current customer, items, payments and balance.
  * Styled as the black-and-gold company invoice; .print-keep makes the
  * printed copy keep the full design instead of flattening to plain text.
+ *
+ * `children` render under the slip, outside the printed area (admin actions
+ * such as recording a payment). Bump `reloadKey` to refetch after a change.
  */
-export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string | null; onClose: () => void }) {
+export function InvoiceQuickView({
+  invoiceRef = null, invoiceId = null, reloadKey = 0, onClose, onLoaded, children,
+}: {
+  invoiceRef?: string | null;
+  invoiceId?: string | null;
+  reloadKey?: number;
+  onClose: () => void;
+  onLoaded?: (d: InvoiceLoaded) => void;
+  children?: React.ReactNode;
+}) {
   const [inv, setInv] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
@@ -36,29 +53,59 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
   const [images, setImages] = useState<Record<string, string>>({});
   const [notFound, setNotFound] = useState(false);
   const COMPANY = useCompany();
+  // Latest callback without re-running the loader when the parent passes an
+  // inline function.
+  const onLoadedRef = useRef(onLoaded);
+  useEffect(() => { onLoadedRef.current = onLoaded; });
+  // Which invoice the slip currently shows — a refetch of the same invoice
+  // (reloadKey) keeps it on screen until the fresh rows arrive; a different
+  // invoice clears it first so the old one never shows under the new title.
+  const shownKey = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!invoiceRef) { setInv(null); setItems([]); setPayments([]); setClient(null); setImages({}); setNotFound(false); return; }
+    const key = invoiceId ? `id:${invoiceId}` : invoiceRef ? `ref:${invoiceRef}` : null;
+    setNotFound(false);
+    if (key !== shownKey.current) {
+      setInv(null); setItems([]); setPayments([]); setClient(null); setImages({});
+      shownKey.current = null;
+    }
+    if (!key) return;
+    let cancelled = false;
     (async () => {
-      const { data: invoice } = await supabase.from("invoices").select("*").eq("invoice_id", invoiceRef).maybeSingle();
-      if (!invoice) { setNotFound(true); return; }
-      setInv(invoice);
+      const base = supabase.from("invoices").select("*");
+      const { data: invoice } = await (invoiceId ? base.eq("id", invoiceId) : base.eq("invoice_id", invoiceRef!)).maybeSingle();
+      if (cancelled) return;
+      if (!invoice) {
+        setInv(null); setItems([]); setPayments([]); setClient(null); setImages({});
+        shownKey.current = null;
+        setNotFound(true);
+        return;
+      }
       const [{ data: it }, { data: pays }, clientRes] = await Promise.all([
-        supabase.from("invoice_items").select("*").eq("invoice_id", invoice.id),
-        supabase.from("invoice_payments").select("*").eq("invoice_id", invoice.id).order("payment_date"),
+        supabase.from("invoice_items").select("*").eq("invoice_id", invoice.id).order("id"),
+        supabase.from("invoice_payments").select("*").eq("invoice_id", invoice.id).order("payment_date").order("id"),
         invoice.client_id
-          ? supabase.from("clients").select("id, name, account_no, current_balance").eq("id", invoice.client_id).maybeSingle()
+          ? supabase.from("clients").select("id, name, account_no, current_balance, phone, address").eq("id", invoice.client_id).maybeSingle()
           : Promise.resolve({ data: null }),
       ]);
-      setItems(it ?? []); setPayments(pays ?? []); setClient(clientRes.data ?? null);
+      if (cancelled) return;
+      const loaded: InvoiceLoaded = { invoice, items: it ?? [], payments: pays ?? [], client: clientRes.data ?? null };
+      setInv(loaded.invoice); setItems(loaded.items); setPayments(loaded.payments); setClient(loaded.client);
+      shownKey.current = key;
+      onLoadedRef.current?.(loaded);
       // Product photos for the item rows (best effort — icon fallback).
-      const pids = [...new Set((it ?? []).map((x: any) => x.product_id).filter(Boolean))] as string[];
+      const pids = [...new Set(loaded.items.map((x: any) => x.product_id).filter(Boolean))] as string[];
       if (pids.length > 0) {
         const { data: prods } = await supabase.from("products").select("id, image_url").in("id", pids);
+        if (cancelled) return;
         setImages(Object.fromEntries((prods ?? []).filter((p: any) => p.image_url).map((p: any) => [p.id, p.image_url])));
       } else setImages({});
     })();
-  }, [invoiceRef]);
+    return () => { cancelled = true; };
+  }, [invoiceId, invoiceRef, reloadKey]);
+
+  const open = !!(invoiceId || invoiceRef);
+  const billName = client?.name ?? inv?.customer_name;
 
   const paid = payments.reduce((a, p) => a + Number(p.amount), 0);
   const balance = inv ? Math.max(0, Number(inv.total_amount) - paid) : 0;
@@ -73,12 +120,12 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
   const profit = inv ? toPaisa(Number(inv.total_amount) - costTotal) : 0;
 
   return (
-    <Dialog open={!!invoiceRef} onOpenChange={(v) => !v && onClose()}>
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Invoice {invoiceRef}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>Invoice {inv?.invoice_id ?? invoiceRef ?? ""}</DialogTitle></DialogHeader>
         {notFound && (
           <div className="text-sm text-muted-foreground py-6 text-center">
-            No invoice found for reference {invoiceRef}.
+            {invoiceRef ? `No invoice found for reference ${invoiceRef}.` : "This invoice could not be found."}
           </div>
         )}
         {inv && (
@@ -159,12 +206,22 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
                     <UserRound className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
-                    <div className="font-bold truncate">{inv.customer_name}</div>
+                    <div className="font-bold truncate">{billName}</div>
                     {client?.account_no
                       ? <div className="text-[11px] text-zinc-500">Account {client.account_no}</div>
-                      : inv.customer_name !== "Walk-in customer"
+                      : billName !== "Walk-in customer"
                         ? <div className="text-[11px] text-zinc-500">Walk-in customer</div>
                         : <div className="mt-1 border-b border-dashed border-zinc-300 w-28" />}
+                    {client?.phone && (
+                      <div className="text-[11px] text-zinc-500 flex items-center gap-1 mt-0.5">
+                        <Phone className="h-3 w-3 shrink-0 text-amber-600" /> {client.phone}
+                      </div>
+                    )}
+                    {client?.address && (
+                      <div className="text-[11px] text-zinc-500 flex items-start gap-1 mt-0.5 break-words">
+                        <MapPin className="h-3 w-3 shrink-0 mt-0.5 text-amber-600" /> <span className="min-w-0">{client.address}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -350,8 +407,36 @@ export function InvoiceQuickView({ invoiceRef, onClose }: { invoiceRef: string |
             </div>
           </div>
         )}
+        {/* Admin actions from the opening screen — never part of the slip. */}
+        {inv && Children.toArray(children).length > 0 && <div className="print:hidden space-y-2">{children}</div>}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Invoice numbers: INV-<timestamp> (this app) and INV<hex> (imported history).
+const INVOICE_REF = /^INV-?[A-Za-z0-9]+$/;
+
+/**
+ * An invoice number that opens the slip when clicked. Anything that doesn't
+ * look like an invoice number (free-text references) stays plain text unless
+ * `known` says it is one. Prints as plain text inside reports.
+ */
+export function InvoiceRefLink({ value, onOpen, known = false }: {
+  value: string;
+  onOpen: (ref: string) => void;
+  known?: boolean;
+}) {
+  if (!known && !INVOICE_REF.test(value.trim())) return <>{value}</>;
+  return (
+    <button
+      type="button"
+      title={`Open invoice ${value}`}
+      onClick={(e) => { e.stopPropagation(); onOpen(value.trim()); }}
+      className="font-mono text-primary underline-offset-2 hover:underline print:text-inherit print:no-underline"
+    >
+      {value}
+    </button>
   );
 }
 

@@ -2,8 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { money } from "@/lib/format";
+import { money, localToday, localDateOf, shortDate } from "@/lib/format";
 import { isTracked, stockOf, oversold } from "@/lib/stock";
+import { loadMonthPnL, monthLabel, type MonthPnL } from "@/lib/finance";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, Legend,
@@ -15,34 +16,68 @@ export const Route = createFileRoute("/_authenticated/admin/reports")({
   component: Reports,
 });
 
-/** "2026-07" for a Date */
-const ym = (d: Date) => d.toISOString().slice(0, 7);
-const monthName = (key: string) => {
-  const [y, m] = key.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+/** "2026-07" for a Date, in the device's local time (never UTC). */
+const ym = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+const monthName = monthLabel;
+
+/** Out-of-stock items are only worth reordering if they still sell. */
+const RECENT_DAYS = 60;
+
+/** Rs 1 lines ring stock out (stock manage / claim clear); they are not sales. */
+const isStockOutRow = (s: { total_price?: number | null; quantity_purchased?: number | null }) => {
+  const qty = Number(s.quantity_purchased) || 0;
+  return qty !== 0 && Number(s.total_price) / qty <= 1;
 };
 
+const pct = (r: number | null) => (r == null ? "—" : `${(r * 100).toFixed(1)}%`);
+/** An amount taken off in the statement: "− Rs 1,200" (plain "Rs 0" when nothing). */
+const minus = (n: number) => (n ? `− ${money(n)}` : money(0));
+/** Signed amount; `|| 0` so a rounded −0 never prints as "Rs -0". */
+const signed = (n: number) => money(n || 0);
+
 function Reports() {
-  const [month, setMonth] = useState(ym(new Date()));
+  const [month, setMonth] = useState(localToday().slice(0, 7));
   const [sales, setSales] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [ledgerPays, setLedgerPays] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [recentInvoices, setRecentInvoices] = useState<any[]>([]);
+  const [pnl, setPnl] = useState<MonthPnL | null>(null);
+  const [pnlError, setPnlError] = useState<string | null>(null);
 
   useEffect(() => {
+    const now = new Date();
+    const recentFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate() - RECENT_DAYS).toISOString();
     (async () => {
-      const [{ data: s }, { data: ip }, { data: lp }, { data: ex }, { data: p }] = await Promise.all([
+      const [{ data: s }, { data: ip }, { data: lp }, { data: ex }, { data: p }, { data: ri }] = await Promise.all([
         fetchAll((a, b) => supabase.from("customer_purchases").select("*, products(product_name)").order("id").range(a, b)),
         fetchAll((a, b) => supabase.from("invoice_payments").select("id, amount, method, payment_date, invoices(client_id)").order("id").range(a, b)),
         fetchAll((a, b) => supabase.from("client_ledger").select("id, amount, method, entry_date, reference").eq("entry_type", "payment").order("id").range(a, b)),
         fetchAll((a, b) => supabase.from("expenses").select("id, amount, date_of_expense").order("id").range(a, b)),
         fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock, track_stock").order("id").range(a, b)),
+        // Every sale (POS, khaata, quotations) is an invoice; returns shrink
+        // its lines in place, so this is what actually sold recently.
+        fetchAll((a, b) => supabase.from("invoices")
+          .select("id, created_at, payment_status, invoice_items(product_id, quantity, unit_price)")
+          .gte("created_at", recentFrom)
+          .or("payment_status.is.null,payment_status.neq.cancelled")
+          .order("id").range(a, b)),
       ]);
       setSales(s ?? []); setPayments(ip ?? []); setLedgerPays(lp ?? []);
-      setExpenses(ex ?? []); setProducts(p ?? []);
+      setExpenses(ex ?? []); setProducts(p ?? []); setRecentInvoices(ri ?? []);
     })();
   }, []);
+
+  // Profit & loss for the selected month (same figures as the dashboard).
+  useEffect(() => {
+    let live = true;
+    setPnl(null); setPnlError(null);
+    loadMonthPnL(month)
+      .then((r) => { if (live) setPnl(r); })
+      .catch((e) => { if (live) setPnlError(e instanceof Error ? e.message : String(e)); });
+    return () => { live = false; };
+  }, [month]);
 
   // Recovered, one row per real payment: walk-in bills settle through
   // invoice_payments; account customers settle through their ledger (their
@@ -67,11 +102,10 @@ function Reports() {
   const mRecovered = allRecovered.filter((r) => (r.date ?? "").startsWith(month));
   const mExpenses = expenses.filter((e) => (e.date_of_expense ?? "").startsWith(month));
 
-  const totalSales = mSales.reduce((a, s) => a + Number(s.total_price), 0);
+  // Cash view: money actually received vs money paid out (refunds included).
   const totalRecovered = mRecovered.reduce((a, r) => a + r.amount, 0);
-  const totalExpenses = mExpenses.reduce((a, e) => a + Number(e.amount), 0);
-  const totalCost = mSales.reduce((a, s) => a + Number(s.cost_price ?? 0) * Number(s.quantity_purchased ?? 1), 0);
-  const grossProfit = totalSales - totalCost;
+  const cashExpenses = mExpenses.reduce((a, e) => a + Number(e.amount), 0);
+  const netCash = totalRecovered - cashExpenses;
 
   // Daily series for the selected month
   const daily = useMemo(() => {
@@ -96,11 +130,36 @@ function Reports() {
   })), [monthOptions, sales, allRecovered]);
 
   const bySales: Record<string, number> = {};
-  mSales.forEach((s) => { const n = s.products?.product_name ?? "—"; bySales[n] = (bySales[n] ?? 0) + s.quantity_purchased; });
+  mSales.filter((s) => !isStockOutRow(s)).forEach((s) => {
+    const n = s.products?.product_name ?? "—";
+    bySales[n] = (bySales[n] ?? 0) + Number(s.quantity_purchased || 0);
+  });
   const most = Object.entries(bySales).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, qty]) => ({ name, qty }));
-  // Services and trade-ins are not stock-tracked, so they can't be out of
-  // stock; a tracked product at or below zero is.
+
+  // Out of stock, but only what still sells: tracked products at or below
+  // zero that sold in the last RECENT_DAYS days. (Services and trade-ins are
+  // not stock-tracked, so they can't be out of stock.)
+  const recentSold = useMemo(() => {
+    const map = new Map<string, { units: number; last: string }>();
+    for (const inv of recentInvoices) {
+      const day = localDateOf(inv.created_at);
+      for (const it of (inv.invoice_items ?? []) as any[]) {
+        const qty = Number(it.quantity) || 0;
+        if (!it.product_id || qty <= 0 || Number(it.unit_price) <= 1) continue;
+        const cur = map.get(it.product_id);
+        map.set(it.product_id, { units: (cur?.units ?? 0) + qty, last: cur && cur.last > day ? cur.last : day });
+      }
+    }
+    return map;
+  }, [recentInvoices]);
   const outStock = products.filter((p) => isTracked(p) && stockOf(p) <= 0);
+  const reorder = outStock
+    .filter((p) => recentSold.has(p.id))
+    .map((p) => ({ ...p, sold: recentSold.get(p.id)! }))
+    .sort((a, b) => b.sold.units - a.sold.units || b.sold.last.localeCompare(a.sold.last));
+  const otherOut = outStock.length - reorder.length;
+
+  const netLabel = pnl && pnl.netProfit < 0 ? "Net loss" : "Net profit";
 
   return (
     <AdminShell title="Monthly Reports">
@@ -114,15 +173,22 @@ function Reports() {
         </Select>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-        <Kpi label="Total sales" v={money(totalSales)} />
-        <Kpi label="Amount recovered" v={money(totalRecovered)} green />
-        <Kpi label="Gross profit" v={money(grossProfit)} green={grossProfit >= 0} accent={grossProfit < 0} />
-        <Kpi label="Expenses" v={money(totalExpenses)} />
-        <Kpi label="Orders" v={String(mSales.length)} />
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 mb-6">
+        <Kpi label="Sales" v={pnl ? signed(pnl.revenue) : "…"} sub="billed, net of returns" />
+        <Kpi label="Gross profit" v={pnl ? signed(pnl.grossProfit) : "…"} sub={pnl ? `margin ${pct(pnl.grossMargin)}` : undefined}
+             green={!!pnl && pnl.grossProfit >= 0} accent={!!pnl && pnl.grossProfit < 0} />
+        <Kpi label="Expenses" v={pnl ? money(pnl.expenses) : "…"} />
+        <Kpi label={netLabel} v={pnl ? signed(pnl.netProfit) : "…"}
+             green={!!pnl && pnl.netProfit >= 0} accent={!!pnl && pnl.netProfit < 0} />
+        <Kpi label="Total loss" v={pnl ? money(pnl.totalLoss) : "…"} accent={!!pnl && pnl.totalLoss > 0} />
+        <Kpi label="Payments recovered" v={money(totalRecovered)} sub="cash received" green />
+        <Kpi label="Orders" v={pnl ? String(pnl.invoiceCount) : "…"} sub="invoices" />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
+        <div className="lg:col-span-2">
+          <PnlCard month={month} pnl={pnl} error={pnlError} />
+        </div>
         <Card title={`Sales trend — ${monthName(month)} (daily)`}>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={daily}>
@@ -169,36 +235,139 @@ function Reports() {
             </BarChart>
           </ResponsiveContainer>
         </Card>
-        <Card title="Out-of-stock products">
+        <Card title="Sold recently, now out of stock — reorder">
           <ul className="text-sm space-y-1 max-h-64 overflow-y-auto">
-            {outStock.length === 0 ? <li className="text-muted-foreground">All products in stock.</li> :
-              outStock.map((p) => (
-                <li key={p.id} className="flex justify-between border-b py-1">
-                  <span>{p.product_name}</span>
-                  <span className="text-destructive">Out of stock{oversold(p) > 0 && ` · ${oversold(p)} oversold`}</span>
+            {reorder.length === 0 ? <li className="text-muted-foreground">Nothing sold in the last {RECENT_DAYS} days is out of stock.</li> :
+              reorder.map((p) => (
+                <li key={p.id} className="flex justify-between gap-3 border-b py-1">
+                  <span className="min-w-0">
+                    <span className="block truncate">{p.product_name}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {p.sold.units} sold in {RECENT_DAYS} days · last {shortDate(`${p.sold.last}T00:00:00`)}
+                    </span>
+                  </span>
+                  <span className="text-destructive shrink-0">Out of stock{oversold(p) > 0 && ` · ${oversold(p)} oversold`}</span>
                 </li>
               ))}
           </ul>
+          {otherOut > 0 && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {otherOut} other out-of-stock product{otherOut === 1 ? "" : "s"} not sold in the last {RECENT_DAYS} days {otherOut === 1 ? "is" : "are"} not listed.
+            </p>
+          )}
         </Card>
-        <Card title={`Summary — ${monthName(month)}`}>
+        <Card title={`Cash — ${monthName(month)}`}>
           <ul className="text-sm space-y-2">
-            <li className="flex justify-between border-b pb-2"><span>Total sales</span><b>{money(totalSales)}</b></li>
-            <li className="flex justify-between border-b pb-2"><span>Cost of goods sold</span><b>{money(totalCost)}</b></li>
-            <li className="flex justify-between border-b pb-2"><span>Gross profit</span><b className={grossProfit >= 0 ? "text-green-600" : "text-destructive"}>{money(grossProfit)}</b></li>
-            <li className="flex justify-between border-b pb-2"><span>Payments recovered</span><b className="text-green-600">{money(totalRecovered)}</b></li>
-            <li className="flex justify-between border-b pb-2"><span>Expenses</span><b className="text-orange-500">{money(totalExpenses)}</b></li>
-            <li className="flex justify-between"><span>Net (recovered − expenses)</span><b className={totalRecovered - totalExpenses >= 0 ? "text-green-600" : "text-destructive"}>{money(totalRecovered - totalExpenses)}</b></li>
+            <li className="flex justify-between border-b pb-2"><span>Payments recovered (cash in)</span><b className="text-green-600">{money(totalRecovered)}</b></li>
+            <li className="flex justify-between border-b pb-2"><span>Expenses paid, incl. refunds (cash out)</span><b className="text-orange-500">{money(cashExpenses)}</b></li>
+            <li className="flex justify-between"><span>Net cash (recovered − expenses)</span><b className={netCash >= 0 ? "text-green-600" : "text-destructive"}>{money(netCash)}</b></li>
           </ul>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Cash only — money received and paid out this month, whatever month the sale was made. For profit, see Profit &amp; loss above.
+          </p>
         </Card>
       </div>
     </AdminShell>
   );
 }
 
-function Kpi({ label, v, accent, green }: { label: string; v: string; accent?: boolean; green?: boolean }) {
-  return <div className="rounded-2xl bg-card p-5 shadow-sm">
+function PnlCard({ month, pnl, error }: { month: string; pnl: MonthPnL | null; error: string | null }) {
+  const title = `Profit & loss — ${monthName(month)}`;
+  if (error) return <Card title={title}><div className="text-sm text-destructive">Could not calculate: {error}</div></Card>;
+  if (!pnl) return <Card title={title}><div className="text-sm text-muted-foreground">Calculating…</div></Card>;
+
+  const topTypes = pnl.expensesByType.slice(0, 6);
+  const restTypes = pnl.expensesByType.slice(6);
+  const restSum = restTypes.reduce((a, t) => a + t.amount, 0);
+  const loss = pnl.netProfit < 0;
+  const netLossPart = Math.max(0, -pnl.netProfit);
+
+  return (
+    <Card title={title}>
+      <div className="grid md:grid-cols-2 gap-x-8 gap-y-4 text-sm">
+        <ul className="space-y-2">
+          <Line2 label="Sales" hint="billed, net of returns" v={signed(pnl.revenue)} />
+          <Line2 label="Cost of goods" hint="cost price of what was sold" v={minus(pnl.cogs)} />
+          <Line2
+            label="Gross profit" hint={`margin ${pct(pnl.grossMargin)}`} v={signed(pnl.grossProfit)} strong
+            tone={pnl.grossProfit >= 0 ? "good" : "bad"}
+          />
+          <Line2 label="Expenses" hint="running costs" v={minus(pnl.expenses)} />
+          <Line2 label="Stock written off" hint="damaged or expired, at purchase price" v={minus(pnl.writeOffs)} />
+          <li className="flex justify-between items-baseline border-t-2 pt-2">
+            <span className="font-semibold">{loss ? "Net loss" : "Net profit"}</span>
+            <b className={`text-lg ${loss ? "text-destructive" : "text-green-600"}`}>{signed(pnl.netProfit)}</b>
+          </li>
+          <li className="flex justify-between items-baseline border-t pt-2">
+            <span>
+              <span className="font-semibold">Total loss</span>
+              <span className="block text-xs text-muted-foreground">
+                Below-cost sales {money(pnl.belowCostLoss)} · Stock written off {money(pnl.writeOffs)} · Net loss {money(netLossPart)}
+              </span>
+            </span>
+            <b className={pnl.totalLoss > 0 ? "text-destructive" : ""}>{money(pnl.totalLoss)}</b>
+          </li>
+        </ul>
+
+        <div className="space-y-4">
+          <div>
+            <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Expenses by type</div>
+            {pnl.expensesByType.length === 0 ? (
+              <div className="text-muted-foreground">No expenses recorded.</div>
+            ) : (
+              <ul className="space-y-1">
+                {topTypes.map((t) => (
+                  <li key={t.type} className="flex justify-between border-b pb-1"><span className="truncate pr-2">{t.type}</span><span>{money(t.amount)}</span></li>
+                ))}
+                {restTypes.length > 0 && (
+                  <li className="flex justify-between border-b pb-1 text-muted-foreground">
+                    <span>All other ({restTypes.length} type{restTypes.length === 1 ? "" : "s"})</span><span>{money(restSum)}</span>
+                  </li>
+                )}
+                <li className="flex justify-between pt-1 font-semibold"><span>Total expenses</span><span>{money(pnl.expenses)}</span></li>
+              </ul>
+            )}
+            {pnl.refundsExcluded > 0 && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Customer refunds of {money(pnl.refundsExcluded)} are not counted as expenses — the returns already reduce sales.
+              </p>
+            )}
+          </div>
+
+          {(pnl.uncostedRevenue > 0 || pnl.stockOutUnits > 0) && (
+            <div className="rounded-xl bg-muted/60 p-3 text-xs space-y-1.5">
+              <div className="font-semibold uppercase tracking-wider text-muted-foreground">Data notes</div>
+              {pnl.uncostedRevenue > 0 && (
+                <p>Sales with no recorded cost price: {money(pnl.uncostedRevenue)}. They count as 100% profit, so gross profit may be overstated — add cost prices to those products.</p>
+              )}
+              {pnl.stockOutUnits > 0 && (
+                <p>Stock removed on Rs 1 bills — not counted as sales: {pnl.stockOutUnits} units, cost {money(pnl.stockOutCost)}.</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function Line2({ label, hint, v, strong, tone }: { label: string; hint?: string; v: string; strong?: boolean; tone?: "good" | "bad" }) {
+  return (
+    <li className="flex justify-between items-baseline border-b pb-2 gap-3">
+      <span>
+        <span className={strong ? "font-semibold" : ""}>{label}</span>
+        {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
+      </span>
+      <b className={tone === "good" ? "text-green-600" : tone === "bad" ? "text-destructive" : ""}>{v}</b>
+    </li>
+  );
+}
+
+function Kpi({ label, v, accent, green, sub }: { label: string; v: string; accent?: boolean; green?: boolean; sub?: string }) {
+  return <div className="rounded-2xl bg-card p-5 shadow-sm min-w-0">
     <div className="text-xs uppercase text-muted-foreground tracking-wider">{label}</div>
-    <div className={`text-2xl font-bold mt-2 ${accent ? "text-destructive" : green ? "text-green-600" : ""}`}>{v}</div>
+    <div className={`text-lg sm:text-xl xl:text-2xl font-bold mt-2 tabular-nums break-words ${accent ? "text-destructive" : green ? "text-green-600" : ""}`}>{v}</div>
+    {sub && <div className="text-xs text-muted-foreground mt-1">{sub}</div>}
   </div>;
 }
 function Card({ title, children }: { title: string; children: React.ReactNode }) {

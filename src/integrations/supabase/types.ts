@@ -23,14 +23,21 @@ export type Database = {
       amanat_items: {
         Row: {
           amanat_no: string | null
+          amount: number | null
           client_id: string | null
+          contact: string | null
           created_at: string
           customer_name: string
+          direction: string
           expected_return_date: string | null
+          from_stock: boolean
           given_date: string
           id: string
           item_name: string
+          kind: string
+          merchant_id: string | null
           notes: string | null
+          party_type: string
           phone: string | null
           product_id: string | null
           quantity: number
@@ -41,14 +48,21 @@ export type Database = {
         }
         Insert: {
           amanat_no?: string | null
+          amount?: number | null
           client_id?: string | null
+          contact?: string | null
           created_at?: string
           customer_name: string
+          direction?: string
           expected_return_date?: string | null
+          from_stock?: boolean
           given_date?: string
           id?: string
           item_name: string
+          kind?: string
+          merchant_id?: string | null
           notes?: string | null
+          party_type?: string
           phone?: string | null
           product_id?: string | null
           quantity?: number
@@ -59,14 +73,21 @@ export type Database = {
         }
         Update: {
           amanat_no?: string | null
+          amount?: number | null
           client_id?: string | null
+          contact?: string | null
           created_at?: string
           customer_name?: string
+          direction?: string
           expected_return_date?: string | null
+          from_stock?: boolean
           given_date?: string
           id?: string
           item_name?: string
+          kind?: string
+          merchant_id?: string | null
           notes?: string | null
+          party_type?: string
           phone?: string | null
           product_id?: string | null
           quantity?: number
@@ -81,6 +102,13 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "amanat_items_merchant_id_fkey"
+            columns: ["merchant_id"]
+            isOneToOne: false
+            referencedRelation: "merchants"
             referencedColumns: ["id"]
           },
           {
@@ -804,6 +832,7 @@ export type Database = {
           email: string | null
           full_name: string | null
           id: string
+          phone: string | null
         }
         Insert: {
           avatar_url?: string | null
@@ -811,6 +840,7 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id: string
+          phone?: string | null
         }
         Update: {
           avatar_url?: string | null
@@ -818,6 +848,7 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id?: string
+          phone?: string | null
         }
         Relationships: []
       }
@@ -857,8 +888,69 @@ export type Database = {
         }
         Relationships: []
       }
+      salary_payments: {
+        Row: {
+          amount: number
+          created_at: string
+          employee_id: string
+          expense_created: boolean
+          expense_id: string | null
+          id: string
+          method: string
+          month: string
+          notes: string | null
+          paid_date: string
+          salary_due: number
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          employee_id: string
+          expense_created?: boolean
+          expense_id?: string | null
+          id?: string
+          method?: string
+          month: string
+          notes?: string | null
+          paid_date?: string
+          salary_due?: number
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          employee_id?: string
+          expense_created?: boolean
+          expense_id?: string | null
+          id?: string
+          method?: string
+          month?: string
+          notes?: string | null
+          paid_date?: string
+          salary_due?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "salary_payments_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "salary_payments_expense_id_fkey"
+            columns: ["expense_id"]
+            isOneToOne: true
+            referencedRelation: "expenses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       stock_adjustments: {
         Row: {
+          amanat_id: string | null
           created_at: string
           delta: number
           id: string
@@ -867,6 +959,7 @@ export type Database = {
           reason: string
         }
         Insert: {
+          amanat_id?: string | null
           created_at?: string
           delta: number
           id?: string
@@ -875,6 +968,7 @@ export type Database = {
           reason?: string
         }
         Update: {
+          amanat_id?: string | null
           created_at?: string
           delta?: number
           id?: string
@@ -883,6 +977,13 @@ export type Database = {
           reason?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "stock_adjustments_amanat_id_fkey"
+            columns: ["amanat_id"]
+            isOneToOne: false
+            referencedRelation: "amanat_items"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "stock_adjustments_product_id_fkey"
             columns: ["product_id"]
@@ -1073,9 +1174,36 @@ export type Database = {
         Args: { _product: string; _counted: number; _reason?: string; _note?: string | null }
         Returns: number
       }
+      salary_mark_paid: {
+        Args: {
+          _employee: string
+          _month: string
+          _amount?: number | null
+          _paid_date?: string
+          _method?: string
+          _expense?: string | null
+          _notes?: string | null
+        }
+        Returns: string
+      }
+      salary_mark_unpaid: {
+        Args: { _employee: string; _month: string }
+        Returns: number
+      }
       client_ledger_delta: {
         Args: { _amount: number; _type: string }
         Returns: number
+      }
+      admin_list_users: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          email: string | null
+          full_name: string | null
+          created_at: string | null
+          last_sign_in_at: string | null
+          roles: string[]
+        }[]
       }
       has_role: {
         Args: {

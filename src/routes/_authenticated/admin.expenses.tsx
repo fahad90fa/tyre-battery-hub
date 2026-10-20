@@ -15,14 +15,41 @@ export const Route = createFileRoute("/_authenticated/admin/expenses")({
   component: ExpensesAdmin,
 });
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const monthLabel = (m: string) => { const [y, mo] = m.split("-").map(Number); return `${MONTHS[mo - 1] ?? "?"} ${y}`; };
+
+/** An expense that is an employee's salary payment (see Employees → payroll). */
+type SalaryLink = { month: string; employee: string; created: boolean };
+
+/** expense id → its salary payment. Loaded separately from the expenses so
+ *  the list still works before the payroll migration has been run. */
+async function loadSalaryLinks(): Promise<Map<string, SalaryLink>> {
+  const map = new Map<string, SalaryLink>();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from("salary_payments")
+      .select("id, month, expense_id, expense_created, employees(name)")
+      .not("expense_id", "is", null).order("id").range(from, from + 999);
+    if (error) return map; // payroll not set up yet: nothing is linked
+    (data ?? []).forEach((p) => {
+      if (p.expense_id) map.set(p.expense_id, { month: p.month, employee: p.employees?.name?.trim() || "employee", created: p.expense_created });
+    });
+    if ((data ?? []).length < 1000) return map;
+  }
+}
+
 function ExpensesAdmin() {
   const [rows, setRows] = useState<any[]>([]);
+  const [links, setLinks] = useState<Map<string, SalaryLink>>(new Map());
   const [form, setForm] = useState({ expense_type: "", amount: 0, notes: "", date: localToday() });
 
   const load = async () => {
-    const { data } = await fetchAll((a, b) => supabase.from("expenses").select("*")
-      .order("date_of_expense", { ascending: false }).order("created_at", { ascending: false }).order("id").range(a, b));
+    const [{ data }, salary] = await Promise.all([
+      fetchAll((a, b) => supabase.from("expenses").select("*")
+        .order("date_of_expense", { ascending: false }).order("created_at", { ascending: false }).order("id").range(a, b)),
+      loadSalaryLinks(),
+    ]);
     setRows(data ?? []);
+    setLinks(salary);
   };
   useEffect(() => { load(); }, []);
 
@@ -37,8 +64,15 @@ function ExpensesAdmin() {
     toast.success("Expense added"); load();
   };
   const remove = async (id: string) => {
-    if (!confirm("Delete this expense?")) return;
-    await supabase.from("expenses").delete().eq("id", id); load();
+    const link = links.get(id);
+    const msg = link
+      ? `Delete this expense?\n\nIt is ${link.employee}'s salary payment for ${monthLabel(link.month)}. ` +
+        `Deleting it also removes that payment, so ${monthLabel(link.month)} shows as Unpaid (or Partial) on the Employees page.`
+      : "Delete this expense?";
+    if (!confirm(msg)) return;
+    const { error } = await supabase.from("expenses").delete().eq("id", id);
+    if (error) return toast.error(error.message);
+    load();
   };
 
   // Group day by day — each date gets its own block with a daily total.
@@ -101,10 +135,20 @@ function ExpensesAdmin() {
                   <div className="font-bold text-orange-500">{money(dayTotal)}</div>
                 </div>
                 <div className="divide-y">
-                  {list.map((r) => (
+                  {list.map((r) => {
+                    const link = links.get(r.id);
+                    return (
                     <div key={r.id} className="flex items-center justify-between px-4 py-2.5 gap-3">
                       <div className="min-w-0">
-                        <div className="text-sm font-medium">{r.expense_type}</div>
+                        <div className="text-sm font-medium">
+                          {r.expense_type}
+                          {link && (
+                            <span className="ml-2 align-middle text-[10px] rounded-full bg-green-600/10 text-green-700 px-2 py-0.5 font-semibold whitespace-nowrap"
+                              title={`${link.employee}'s salary for ${monthLabel(link.month)}${link.created ? " (added from Employees)" : " (linked on Employees)"}`}>
+                              Salary · {monthLabel(link.month)}
+                            </span>
+                          )}
+                        </div>
                         {r.notes && <div className="text-xs text-muted-foreground truncate">{r.notes}</div>}
                         <div className="text-[10px] text-muted-foreground">{shortDate(r.date_of_expense)}</div>
                       </div>
@@ -113,7 +157,8 @@ function ExpensesAdmin() {
                         <Button variant="ghost" size="icon" onClick={() => remove(r.id)}><Trash2 className="h-4 w-4" /></Button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             );

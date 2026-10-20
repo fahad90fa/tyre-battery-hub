@@ -8,7 +8,15 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { matchesQuery } from "@/lib/search";
 
-export type SearchableOption = { value: string; label: string; hint?: string };
+export type SearchableOption = {
+  value: string;
+  label: string;
+  hint?: string;
+  /** Kept out of the browse list; shown once the user types (e.g. sold-out products). */
+  searchOnly?: boolean;
+};
+
+const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
 
 /**
  * Select with a built-in live search box. Drop-in replacement for the
@@ -17,7 +25,7 @@ export type SearchableOption = { value: string; label: string; hint?: string };
  */
 export function SearchableSelect({
   options, value, onValueChange, placeholder = "Select...", searchPlaceholder = "Type to search...", emptyText = "No match found.", className,
-  onCreate, createLabel = "Add",
+  onCreate, createLabel = "Add", hiddenNoun = "out-of-stock item",
 }: {
   options: SearchableOption[];
   value: string;
@@ -29,13 +37,19 @@ export function SearchableSelect({
   /** When set, typing a name with no exact match shows an "Add ..." row that calls this. */
   onCreate?: (label: string) => void;
   createLabel?: string;
+  /** What the search-only options are, for the "N … hidden" footer (singular; an "s" is added). */
+  hiddenNoun?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const selected = options.find((o) => o.value === value);
   const trimmed = query.trim();
+  // Hidden (search-only) options still count here, so "Add new" is never
+  // offered for a name that already exists — typing it shows the existing one.
   const canCreate = !!onCreate && trimmed.length > 0 &&
-    !options.some((o) => o.label.toLowerCase() === trimmed.toLowerCase());
+    !options.some((o) => norm(o.label) === norm(trimmed));
+  const visible = trimmed ? options : options.filter((o) => !o.searchOnly || o.value === value);
+  const hiddenCount = options.length - visible.length;
 
   return (
     <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQuery(""); }}>
@@ -69,7 +83,7 @@ export function SearchableSelect({
               ) : emptyText}
             </CommandEmpty>
             <CommandGroup>
-              {options.map((o) => (
+              {visible.map((o) => (
                 <CommandItem
                   key={o.value}
                   value={`${o.label} ${o.hint ?? ""}`}
@@ -89,6 +103,11 @@ export function SearchableSelect({
                 </CommandItem>
               )}
             </CommandGroup>
+            {hiddenCount > 0 && (
+              <div className="px-3 py-2 text-[11px] text-muted-foreground border-t">
+                {hiddenCount} {hiddenNoun}{hiddenCount === 1 ? "" : "s"} hidden — type a name to find {hiddenCount === 1 ? "it" : "them"}
+              </div>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>

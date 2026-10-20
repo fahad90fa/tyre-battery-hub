@@ -2,7 +2,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
-import { printArea } from "@/lib/print";
 import { money, shortDate, localToday, localDateOf } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, paymentStatus, summarizeMethods } from "@/lib/payments";
 import { sumMoney, toPaisa } from "@/lib/pricing";
@@ -14,8 +13,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Printer, EyeOff, Undo2, Search, X } from "lucide-react";
-import { Letterhead } from "@/components/admin/Letterhead";
+import { Undo2, Search, X } from "lucide-react";
+import { InvoiceQuickView, type InvoiceLoaded } from "@/components/admin/InvoiceQuickView";
 import { fetchAll } from "@/lib/fetchAll";
 
 export const Route = createFileRoute("/_authenticated/admin/invoices")({
@@ -26,8 +25,10 @@ function InvoicesAdmin() {
   const [rows, setRows] = useState<any[]>([]);
   const [payments, setPayments] = useState<Record<string, any[]>>({});
   const [open, setOpen] = useState<any>(null);
+  // Lines of the open invoice, as loaded by the slip — used by the Return dialog.
   const [items, setItems] = useState<any[]>([]);
-  const [client, setClient] = useState<any>(null);
+  // Bumped after a payment or return so the open slip refetches its rows.
+  const [slipVersion, setSlipVersion] = useState(0);
   const [tab, setTab] = useState("all");
   const [dateFilter, setDateFilter] = useState("");
   const [q, setQ] = useState("");
@@ -98,20 +99,23 @@ function InvoicesAdmin() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [rows, payments]);
 
-  const viewReq = useRef(0);
-  const view = async (inv: any) => {
+  // The slip (InvoiceQuickView) loads the invoice's lines; they are kept here
+  // for the Return dialog. The id check drops lines of an invoice that is no
+  // longer the open one, so a return can never act on another bill's lines.
+  const openId = useRef<string | null>(null);
+  const view = (inv: any) => {
+    openId.current = inv.id;
     setOpen(inv);
     setItems([]);
-    setClient(null);
     setPayForm({ method: "cash", amount: Math.max(0, Number(inv.total_amount) - paidOf(inv)) });
-    const req = ++viewReq.current;
-    const [{ data }, clientRes] = await Promise.all([
-      fetchAll((a, b) => supabase.from("invoice_items").select("*").eq("invoice_id", inv.id).order("id").range(a, b)),
-      inv.client_id
-        ? supabase.from("clients").select("id, name, account_no, current_balance").eq("id", inv.client_id).maybeSingle()
-        : Promise.resolve({ data: null }),
-    ]);
-    if (req === viewReq.current) { setItems(data ?? []); setClient(clientRes.data ?? null); }
+  };
+  const closeView = () => {
+    openId.current = null;
+    setOpen(null);
+    setItems([]);
+  };
+  const onSlipLoaded = (d: InvoiceLoaded) => {
+    if (d.invoice?.id === openId.current) setItems(d.items);
   };
 
   const addPayment = async () => {
@@ -140,6 +144,7 @@ function InvoicesAdmin() {
     await load();
     setOpen({ ...open, payment_status: newStatus });
     setPayForm({ method: "cash", amount: 0 });
+    setSlipVersion((v) => v + 1);
   };
 
   // ---- Returns / cancellation -------------------------------------------
@@ -261,21 +266,13 @@ function InvoicesAdmin() {
       setReturnOpen(false);
       await load();
       const { data: fresh } = await supabase.from("invoices").select("*").eq("id", open.id).maybeSingle();
-      if (fresh) view(fresh); else setOpen(null);
+      if (fresh) { view(fresh); setSlipVersion((v) => v + 1); } else closeView();
     } finally {
       setProcessing(false);
     }
   };
 
-  const cost = items.reduce((a, it) => a + Number(it.cost_price ?? 0) * it.quantity, 0);
-  const hasCost = items.some((it) => it.cost_price != null);
-  const profit = Number(open?.total_amount ?? 0) - cost;
-  const openPaid = open ? paidOf(open) : 0;
   const openBalance = open ? balanceOf(open) : 0;
-  // The account's standing before this bill; adding this bill's balance on
-  // top gives the total the customer owes right now.
-  const accountTotal = client ? Number(client.current_balance) || 0 : 0;
-  const previousBalance = client ? toPaisa(accountTotal - openBalance) : 0;
 
   return (
     <AdminShell title="Invoices">
@@ -352,120 +349,30 @@ function InvoicesAdmin() {
         </table>
       </div>
 
-      <Dialog open={!!open} onOpenChange={(v) => !v && setOpen(null)}>
-        <DialogContent className="max-w-xl print:shadow-none max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Invoice {open?.invoice_id}</DialogTitle></DialogHeader>
-
-          {/* Customer-facing section — this is what gets printed, on letterhead */}
-          <div className="print-area text-sm space-y-2">
-            <Letterhead docTitle="Invoice" docNo={open?.invoice_id ?? ""} date={open?.created_at} />
-            {open && isCancelled(open) && (
-              <div className="rounded-lg border-2 border-destructive text-destructive font-black text-center py-1.5 uppercase tracking-widest">
-                Cancelled — items returned
-              </div>
-            )}
-            <div className="flex justify-between text-muted-foreground">
-              <span>Customer</span>
-              <span>{open?.customer_name}{client?.account_no ? ` (${client.account_no})` : ""}</span>
+      {/* The same black & gold slip as POS and the customer ledger, with the
+          admin actions underneath (never printed). */}
+      <InvoiceQuickView invoiceId={open?.id ?? null} invoiceRef={open?.invoice_id ?? null}
+                        reloadKey={slipVersion} onClose={closeView} onLoaded={onSlipLoaded}>
+        {open && !isCancelled(open) && openBalance > 0 && (
+          <div className="rounded-xl border p-3 space-y-2">
+            <Label className="text-xs uppercase text-muted-foreground tracking-wider">Record payment (recovery)</Label>
+            <div className="flex gap-2">
+              <Select value={payForm.method} onValueChange={(v) => setPayForm({ ...payForm, method: v })}>
+                <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+                <SelectContent>{PAYMENT_METHODS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent>
+              </Select>
+              <Input type="number" value={payForm.amount || ""} placeholder="Amount"
+                     onChange={(e) => setPayForm({ ...payForm, amount: Number(e.target.value) })} />
+              <Button onClick={addPayment}>Add</Button>
             </div>
-            <div className="flex justify-between text-muted-foreground">
-              <span>Date</span><span>{shortDate(open?.created_at)}</span>
-            </div>
-            <table className="w-full mt-4 border-t">
-              <thead><tr className="text-left text-xs uppercase text-muted-foreground"><th className="py-2">Item</th><th>Qty</th><th className="text-right">Total</th></tr></thead>
-              <tbody>{items.map((it) => (
-                <tr key={it.id} className="border-t"><td className="py-2">{it.product_name}</td><td>{it.quantity}</td><td className="text-right">{money(it.total_price)}</td></tr>
-              ))}</tbody>
-            </table>
-            <div className="flex justify-between pt-3 border-t font-bold text-base">
-              <span>This invoice</span><span>{money(open?.total_amount)}</span>
-            </div>
-            <div className="flex justify-between text-green-600">
-              <span>Paid</span><span>{money(openPaid)}</span>
-            </div>
-            {openBalance > 0 && (
-              <div className="flex justify-between font-semibold text-orange-500">
-                <span>Balance due{open?.due_date ? ` (by ${shortDate(open.due_date)})` : ""}</span>
-                <span>{money(openBalance)}</span>
-              </div>
-            )}
-            {client && (
-              // Full account position, so the customer can read everything
-              // they owe straight off the invoice.
-              <div className="pt-2 border-t space-y-1">
-                <div className="text-xs uppercase text-muted-foreground">Account summary — {client.name}</div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>Previous balance (other bills)</span><span className="text-foreground">{money(previousBalance)}</span>
-                </div>
-                <div className="flex justify-between text-muted-foreground">
-                  <span>This invoice balance</span><span className="text-foreground">{money(openBalance)}</span>
-                </div>
-                <div className="flex justify-between font-bold text-base border-t pt-1">
-                  <span>Total outstanding</span>
-                  <span className={accountTotal > 0 ? "text-orange-500" : "text-green-600"}>{money(accountTotal)}</span>
-                </div>
-              </div>
-            )}
-            {(payments[open?.id] ?? []).length > 0 && (
-              <div className="pt-2 border-t">
-                <div className="text-xs uppercase text-muted-foreground mb-1">Payments</div>
-                {(payments[open?.id] ?? []).map((p) => (
-                  <div key={p.id} className="flex justify-between text-xs py-0.5">
-                    <span>{shortDate(p.payment_date)} — {methodLabel(p.method)}</span>
-                    <span>{money(p.amount)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
-
-          {/* Internal section — never printed, admin only */}
-          <div className="print:hidden rounded-xl border border-dashed p-3 text-sm space-y-1 bg-muted/40">
-            <div className="flex items-center gap-2 text-xs uppercase text-muted-foreground tracking-wider">
-              <EyeOff className="h-3.5 w-3.5" /> Internal — hidden from customer
-            </div>
-            {hasCost ? (
-              <>
-                <div className="flex justify-between"><span>Cost (purchase price)</span><span>{money(cost)}</span></div>
-                <div className="flex justify-between font-semibold">
-                  <span>Profit</span>
-                  <span className={profit >= 0 ? "text-green-600" : "text-destructive"}>
-                    {money(profit)} ({open?.total_amount > 0 ? Math.round((profit / open.total_amount) * 100) : 0}%)
-                  </span>
-                </div>
-              </>
-            ) : (
-              <div className="text-muted-foreground text-xs">No cost data recorded for this invoice (older sale).</div>
-            )}
-          </div>
-
-          {open && !isCancelled(open) && openBalance > 0 && (
-            <div className="print:hidden rounded-xl border p-3 space-y-2">
-              <Label className="text-xs uppercase text-muted-foreground tracking-wider">Record payment (recovery)</Label>
-              <div className="flex gap-2">
-                <Select value={payForm.method} onValueChange={(v) => setPayForm({ ...payForm, method: v })}>
-                  <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
-                  <SelectContent>{PAYMENT_METHODS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent>
-                </Select>
-                <Input type="number" value={payForm.amount || ""} placeholder="Amount"
-                       onChange={(e) => setPayForm({ ...payForm, amount: Number(e.target.value) })} />
-                <Button onClick={addPayment}>Add</Button>
-              </div>
-            </div>
-          )}
-
-          <div className="flex gap-2 mt-2 print:hidden">
-            {open && !isCancelled(open) && items.length > 0 && (
-              <Button variant="outline" className="flex-1 text-destructive hover:text-destructive" onClick={openReturn}>
-                <Undo2 className="h-4 w-4 mr-2" /> Return / cancel
-              </Button>
-            )}
-            <Button className="flex-1" onClick={() => printArea()}>
-              <Printer className="h-4 w-4 mr-2" /> Print
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+        )}
+        {open && !isCancelled(open) && items.length > 0 && (
+          <Button variant="outline" className="w-full text-destructive hover:text-destructive" onClick={openReturn}>
+            <Undo2 className="h-4 w-4 mr-2" /> Return / cancel
+          </Button>
+        )}
+      </InvoiceQuickView>
 
       {/* Return / cancel dialog */}
       <Dialog open={returnOpen} onOpenChange={(v) => !v && setReturnOpen(false)}>
