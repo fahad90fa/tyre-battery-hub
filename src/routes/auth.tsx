@@ -45,9 +45,18 @@ function AuthPage() {
       }
     });
 
+    // Only treat the current session as the account being reset when the
+    // link worked AND that account really asked for a reset recently.
+    // Otherwise a failed or expired link opened on a PC where someone else is
+    // signed in would change THEIR password.
+    const askedForReset = (u: { recovery_sent_at?: string | null } | undefined) => {
+      const t = u?.recovery_sent_at ? Date.parse(u.recovery_sent_at) : 0;
+      return t > 0 && Date.now() - t < 24 * 60 * 60 * 1000;
+    };
+
     supabase.auth.getSession().then(({ data }) => {
-      if (wantsReset) {
-        if (data.session) {
+      if (wantsReset || linkError) {
+        if (!linkError && data.session && askedForReset(data.session.user)) {
           setMode("reset");
           setRecoveryEmail(data.session.user.email ?? "");
         } else {
