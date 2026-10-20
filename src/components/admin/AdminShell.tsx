@@ -19,7 +19,7 @@ const GROUPS: { label: string; links: { to: string; label: string; icon: any; ex
     { to: "/admin/templates", label: "Templates", icon: LayoutTemplate },
     { to: "/admin/stock", label: "Stock Purchases", icon: Truck },
     { to: "/admin/inventory", label: "Stock Movements", icon: ArrowLeftRight },
-    { to: "/admin/amanat", label: "Amanat (Deposit)", icon: PackageOpen },
+    { to: "/admin/amanat", label: "Amanat", icon: PackageOpen },
   ]},
   { label: "Accounts", links: [
     { to: "/admin/clients", label: "Customer Accounts", icon: UserCircle },

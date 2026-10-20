@@ -7,6 +7,7 @@ import { PAYMENT_METHODS, methodLabel } from "@/lib/payments";
 import { sumMoney } from "@/lib/pricing";
 import { allocatePaymentToInvoices } from "@/lib/allocate";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
+import { InvoiceQuickView, InvoiceRefLink } from "@/components/admin/InvoiceQuickView";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +26,7 @@ type Flow = {
   kind: "recovery" | "sale-payment" | "merchant-payment" | "expense";
   who: string;
   detail: string;
+  ref?: string; // customer invoice / ledger reference — shown as a link that opens the invoice
   amount: number; // positive = in, negative = out
   method?: string; // how the money moved — cash / bank / jazzcash / ...
 };
@@ -46,6 +48,8 @@ function Recoveries() {
   const [day, setDay] = useState("");                // "" = every day; set = that exact date only
   const [receive, setReceive] = useState(blankReceive);
   const [savingReceive, setSavingReceive] = useState(false);
+  // Invoice slip opened from an invoice number in the day-wise record.
+  const [viewInvoice, setViewInvoice] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -111,7 +115,8 @@ function Recoveries() {
         key: `ip-${p.id}`, date: p.payment_date,
         kind: isRecovery ? "recovery" : "sale-payment",
         who: p.invoices?.customer_name ?? "Walk-in",
-        detail: `${methodLabel(p.method)}${p.invoices?.invoice_id ? ` · ${p.invoices.invoice_id}` : ""}`,
+        detail: methodLabel(p.method),
+        ref: p.invoices?.invoice_id ?? undefined,
         amount: Number(p.amount),
         method: p.method ?? "cash",
       });
@@ -124,7 +129,8 @@ function Recoveries() {
         key: `lp-${l.id}`, date: l.entry_date,
         kind: saleDay && saleDay === l.entry_date ? "sale-payment" : "recovery",
         who: l.clients ? `${l.clients.account_no ? `${l.clients.account_no} · ` : ""}${l.clients.name}` : "Customer",
-        detail: [methodLabel(l.method ?? "cash"), l.reference, l.note].filter(Boolean).join(" · "),
+        detail: [methodLabel(l.method ?? "cash"), l.note].filter(Boolean).join(" · "),
+        ref: l.reference || undefined,
         amount: Number(l.amount),
         method: l.method ?? "cash",
       });
@@ -433,7 +439,12 @@ function Recoveries() {
                         <span className={`text-[10px] rounded-full px-2 py-0.5 font-semibold ${KIND[f.kind].cls}`}>{KIND[f.kind].label}</span>
                         <span className="text-sm font-medium truncate">{f.who}</span>
                       </div>
-                      {f.detail && <div className="text-xs text-muted-foreground truncate mt-0.5">{f.detail}</div>}
+                      {(f.detail || f.ref) && (
+                        <div className="text-xs text-muted-foreground truncate mt-0.5">
+                          {f.detail}
+                          {f.ref && <>{f.detail ? " · " : ""}<InvoiceRefLink value={f.ref} onOpen={setViewInvoice} /></>}
+                        </div>
+                      )}
                     </div>
                     <div className={`font-bold whitespace-nowrap ${f.amount >= 0 ? "text-green-600" : "text-orange-500"}`}>
                       {f.amount >= 0 ? "+" : "−"}{money(Math.abs(f.amount))}
@@ -445,6 +456,8 @@ function Recoveries() {
           );
         })}
       </div>
+
+      <InvoiceQuickView invoiceRef={viewInvoice} onClose={() => setViewInvoice(null)} />
     </AdminShell>
   );
 }

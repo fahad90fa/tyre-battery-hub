@@ -18,6 +18,7 @@ drop table if exists public.client_ledger cascade;
 drop table if exists public.clients cascade;
 drop table if exists public.merchant_ledger cascade;
 drop table if exists public.merchants cascade;
+drop table if exists public.salary_payments cascade;
 drop table if exists public.employees cascade;
 drop table if exists public.reports_inbox cascade;
 drop table if exists public.templates cascade;
@@ -37,6 +38,7 @@ create table public.profiles (
   full_name text,
   email text,
   avatar_url text,
+  phone text,
   created_at timestamptz not null default now()
 );
 
@@ -250,7 +252,10 @@ create table public.employees (
   salary numeric,
   id uuid primary key default gen_random_uuid(),
   email text,
-  cnic text
+  cnic text,
+  -- set when made inactive, cleared when reactivated (payroll keeps the
+  -- months they still worked due)
+  left_on date
 );
 
 create table public.reports_inbox (
@@ -350,10 +355,50 @@ create table public.amanat_items (
   quantity integer not null default 1,
   given_date date not null default current_date,
   expected_return_date date,
-  status text not null default 'out',
+  -- 'pending' = still open, 'received' = settled
+  status text not null default 'pending' constraint amanat_items_status_chk check (status in ('pending', 'received')),
   returned_date date,
   returned_quantity integer not null default 0,
+  notes text,
+  -- Customer or Merchant Amanat (migration 20261020000000)
+  party_type text not null default 'client' constraint amanat_items_party_type_chk check (party_type in ('client', 'merchant')),
+  merchant_id uuid references public.merchants(id) on delete set null,
+  -- 'taken' = the party took our item/money; 'left' = they left theirs with us
+  direction text not null default 'taken' constraint amanat_items_direction_chk check (direction in ('taken', 'left')),
+  kind text not null default 'item' constraint amanat_items_kind_chk check (kind in ('item', 'money')),
+  amount numeric,
+  contact text,
+  from_stock boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint amanat_items_party_chk check ((party_type = 'client' and merchant_id is null) or (party_type = 'merchant' and client_id is null)),
+  constraint amanat_items_money_amount_chk check (kind <> 'money' or coalesce(amount, 0) > 0),
+  constraint amanat_items_quantity_chk check (quantity > 0),
+  constraint amanat_items_returned_qty_chk check (returned_quantity between 0 and quantity)
+);
+create index if not exists amanat_items_merchant_idx on public.amanat_items (merchant_id);
+
+-- An item taken out of shelf stock on amanat is booked as dated
+-- stock_adjustments rows (given out, each return), linked by amanat_id.
+alter table public.stock_adjustments add column amanat_id uuid references public.amanat_items(id) on delete cascade;
+create index if not exists stock_adjustments_amanat_id_idx
+  on public.stock_adjustments (amanat_id) where amanat_id is not null;
+
+-- Monthly payroll (migration 20261020000100): one row per salary payment;
+-- every payment is also an expense, exactly once.
+create table public.salary_payments (
+  id uuid primary key default gen_random_uuid(),
+  employee_id uuid not null references public.employees(id) on delete cascade,
+  month text not null check (month ~ '^\d{4}-(0[1-9]|1[0-2])$'),
+  amount numeric not null check (amount > 0),
+  salary_due numeric not null default 0,
+  paid_date date not null default current_date,
+  method text not null default 'cash',
+  expense_id uuid unique references public.expenses(id) on delete cascade,
+  expense_created boolean not null default true,
   notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+create index if not exists salary_payments_month_idx on public.salary_payments (month);
+create index if not exists salary_payments_employee_month_idx on public.salary_payments (employee_id, month);

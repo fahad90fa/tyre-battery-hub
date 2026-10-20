@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { applyPct, inStockFirst, sumMoney } from "@/lib/pricing";
-import { stockLabel } from "@/lib/stock";
+import { productOption } from "@/lib/stock";
 import { getOrCreateProduct } from "@/lib/products";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
@@ -195,8 +195,13 @@ function StockAdmin() {
               <div key={l.uid} className="space-y-2.5 rounded-xl border bg-muted/20 p-3">
                 <div className="flex gap-1.5 items-center">
                   <div className="flex-1 min-w-0">
+                    {/* Browsing lists what is on the shelf; a sold-out product
+                        (or a service) is found by typing its name, so a
+                        restock lands on the same record — "Add new product"
+                        never appears for a name that already exists. */}
                     <SearchableSelect
-                      options={inStockFirst(products).map((p) => ({ value: p.id, label: p.product_name, hint: stockLabel(p) }))}
+                      options={inStockFirst(products).map((p) => productOption(p, undefined, { hideUntracked: true }))}
+                      hiddenNoun="out-of-stock or service item"
                       value={l.product_id}
                       onValueChange={(v) => {
                         const p = products.find((x) => x.id === v);
@@ -206,7 +211,7 @@ function StockAdmin() {
                         setLine(i, { product_id: v, base, pct: 0, unit_cost: base });
                       }}
                       placeholder="Product"
-                      searchPlaceholder="Search or type new product name..."
+                      searchPlaceholder="Search any product (sold-out too) or type a new name..."
                       onCreate={(name) => createProduct(l.uid, name)}
                       createLabel="Add new product"
                     />

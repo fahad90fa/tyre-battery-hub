@@ -26,3 +26,32 @@ export const oversold = (p: StockFields) => (isTracked(p) && stockOf(p) < 0 ? -s
 /** Short label for lists: "7 left", "Out of stock" or "Not tracked". */
 export const stockLabel = (p: StockFields) =>
   !isTracked(p) ? "Not tracked" : stockOf(p) > 0 ? `${stockOf(p)} left` : "Out of stock";
+
+/**
+ * The one rule every browse list and picker follows: a stock-tracked product
+ * with nothing on the shelf is left out of browsing (no clutter), but a typed
+ * search still finds it, so restocking or selling reuses the same record
+ * instead of creating a duplicate. It comes back by itself once stock is
+ * booked. Untracked products (services, trade-ins) are always sellable and
+ * never hidden by this rule.
+ */
+export const hiddenFromBrowse = (p: StockFields) => isTracked(p) && stockOf(p) <= 0;
+
+/**
+ * Option for a SearchableSelect product picker. Products hidden from browse
+ * (see hiddenFromBrowse) are search-only: out of the list until a name is
+ * typed. `hideUntracked` makes services/trade-ins search-only too — noise in
+ * the purchase picker, where they are never booked in.
+ */
+export function productOption(
+  p: StockFields & { id: string; product_name: string | null },
+  hint?: string,
+  { hideUntracked = false }: { hideUntracked?: boolean } = {},
+): { value: string; label: string; hint: string; searchOnly: boolean } {
+  return {
+    value: p.id,
+    label: p.product_name ?? "—",
+    hint: hint ? `${hint} · ${stockLabel(p)}` : stockLabel(p),
+    searchOnly: hiddenFromBrowse(p) || (hideUntracked && !isTracked(p)),
+  };
+}

@@ -1,7 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { normalizeProductName } from "@/lib/pricing";
-import { isTracked } from "@/lib/stock";
+import { isTracked, stockOf } from "@/lib/stock";
 
 export type ProductRow = Database["public"]["Tables"]["products"]["Row"];
 type ProductInsert = Database["public"]["Tables"]["products"]["Insert"];
@@ -10,7 +10,10 @@ type ProductInsert = Database["public"]["Tables"]["products"]["Insert"];
  * The product whose normalised name equals `name`, or null. The database is
  * asked for a loose ILIKE match (every word of the name, in order, with
  * anything in between) and the exact comparison happens here, so spacing
- * and case differences still find the one product.
+ * and case differences still find the one product. Until the duplicate merge
+ * has run several old copies can share a name: the one with the most stock
+ * wins (then the one with a shop price, then the newest), the same copy the
+ * merge keeps, so restocking lands on the record that will survive.
  */
 export async function findProductByName(name: string): Promise<ProductRow | null> {
   const norm = normalizeProductName(name);
@@ -22,7 +25,13 @@ export async function findProductByName(name: string): Promise<ProductRow | null
   const { data, error } = await supabase.from("products").select("*")
     .ilike("product_name", `%${words.join("%")}%`).limit(500);
   if (error) throw error;
-  return (data ?? []).find((p) => normalizeProductName(p.product_name) === norm) ?? null;
+  const matches = (data ?? []).filter((p) => normalizeProductName(p.product_name) === norm);
+  if (matches.length <= 1) return matches[0] ?? null;
+  const rank = (a: ProductRow, b: ProductRow) =>
+    stockOf(b) - stockOf(a)
+    || (Number(b.selling_price) || 0) - (Number(a.selling_price) || 0)
+    || (b.created_at ?? "").localeCompare(a.created_at ?? "");
+  return [...matches].sort(rank)[0];
 }
 
 /**

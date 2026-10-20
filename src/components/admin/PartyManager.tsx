@@ -15,17 +15,26 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, BookOpen, Printer, Search, Wallet, Users, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, Trash2, BookOpen, Printer, Search, Wallet, Users, AlertTriangle, PackageOpen, PackageCheck, Undo2, ChevronDown, ChevronUp } from "lucide-react";
 import { COMPANY } from "@/lib/company";
+import {
+  AmanatForm, DirectionChip, StatusChip, amanatTotals, amanatWhat, isOverdue, isPending, outstandingQty,
+  setAmanatReceived, settledWord, totalsText, type AmanatRow,
+} from "@/components/admin/AmanatForm";
 
 export type PartyKind = "merchants" | "clients";
 const LEDGER_TABLE: Record<PartyKind, "merchant_ledger" | "client_ledger"> = {
   merchants: "merchant_ledger",
   clients: "client_ledger",
 };
+// The party's column on the ledger and on amanat_items alike.
 const FK: Record<PartyKind, "merchant_id" | "client_id"> = {
   merchants: "merchant_id",
   clients: "client_id",
+};
+const AMANAT_PARTY: Record<PartyKind, "merchant" | "client"> = {
+  merchants: "merchant",
+  clients: "client",
 };
 const TYPES: Record<PartyKind, { value: string; label: string }[]> = {
   merchants: [
@@ -66,10 +75,20 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
   const [open, setOpen] = useState(false);
   const [ledgerFor, setLedgerFor] = useState<any | null>(null);
   const [overdueByParty, setOverdueByParty] = useState<Record<string, number>>({});
+  const [amanatByParty, setAmanatByParty] = useState<Record<string, number>>({});
 
   const load = async () => {
     const { data } = await supabase.from(kind).select("*").order("name");
     setRows(data ?? []);
+    // Pending amanat per account (things held in trust, either way round).
+    const { data: am } = await supabase.from("amanat_items")
+      .select("client_id, merchant_id").eq("status", "pending").not(FK[kind], "is", null);
+    const amap: Record<string, number> = {};
+    (am ?? []).forEach((a) => {
+      const id = a[FK[kind]];
+      if (id) amap[id] = (amap[id] ?? 0) + 1;
+    });
+    setAmanatByParty(amap);
     if (kind === "clients") {
       const today = localToday();
       const { data: inv } = await supabase.from("invoices")
@@ -181,6 +200,12 @@ export function PartyManager({ kind, title }: { kind: PartyKind; title: string }
                       {overdueByParty[r.id]} overdue
                     </span>
                   )}
+                  {amanatByParty[r.id] > 0 && (
+                    <span className="ml-2 text-[10px] rounded-full bg-blue-500/10 text-blue-600 px-2 py-0.5 whitespace-nowrap"
+                          title="Amanat pending (held in trust, not in balance)">
+                      {amanatByParty[r.id]} amanat
+                    </span>
+                  )}
                 </td>
                 <td className="p-3 text-muted-foreground">{r.phone ?? "—"}</td>
                 <td className="p-3 text-muted-foreground max-w-[180px] truncate">{r.address ?? "—"}</td>
@@ -241,6 +266,9 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
   const [overdueInvoices, setOverdueInvoices] = useState<any[]>([]);
   const [viewInvoice, setViewInvoice] = useState<string | null>(null);
   const [viewPurchase, setViewPurchase] = useState<string | null>(null);
+  const [amanat, setAmanat] = useState<AmanatRow[]>([]);
+  const [amanatOpen, setAmanatOpen] = useState(false);
+  const [showSettled, setShowSettled] = useState(false);
 
   // The real line items behind each bill reference, so the ledger shows
   // Product | Qty | Unit price | Total instead of one crammed note.
@@ -297,8 +325,19 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
         .order("due_date", { ascending: true, nullsFirst: false });
       setOverdueInvoices(inv ?? []);
     }
+    const { data: am } = await supabase.from("amanat_items").select("*")
+      .eq(FK[kind], party.id)
+      .order("given_date", { ascending: false }).order("created_at", { ascending: false });
+    setAmanat((am ?? []) as unknown as AmanatRow[]);
   };
   useEffect(() => { load(); }, [party.id]);
+
+  const toggleAmanat = async (r: AmanatRow) => {
+    const err = await setAmanatReceived(r, isPending(r));
+    if (err) return toast.error(err);
+    toast.success(isPending(r) ? `${amanatWhat(r)} — ${settledWord(r).toLowerCase()}` : `${r.amanat_no ?? "Amanat"} reopened`);
+    load(); onChanged();
+  };
 
   // Items belong on the bill entry itself (sale / purchase) — a payment row
   // sharing the same reference must not repeat the product list.
@@ -351,6 +390,11 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
   const totalDown = entries.filter((e) => !INCREASES[kind].includes(e.entry_type)).reduce((a, e) => a + Number(e.amount), 0);
   const today = localToday();
   const isPaymentType = form.entry_type === "payment";
+  const amanatPending = amanat.filter(isPending)
+    .sort((a, b) => Number(isOverdue(b, today)) - Number(isOverdue(a, today)));
+  const amanatSettled = amanat.filter((r) => !isPending(r));
+  const amanatLeft = amanatTotals(amanat, "left");
+  const amanatTaken = amanatTotals(amanat, "taken");
 
   return (
     <div className="mt-4 space-y-4">
@@ -392,12 +436,85 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
         </div>
       )}
 
+      {/* Amanat: items / money held in trust with this party, either way
+          round. Never part of the balance above — shown beside it. */}
+      {amanat.length > 0 && (
+        <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-3">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="text-xs font-semibold text-blue-600 inline-flex items-center gap-1.5">
+              <PackageOpen className="h-3.5 w-3.5" /> Amanat — held in trust (not in balance)
+            </div>
+            {amanatPending.length > 0 && <span className="text-[10px] text-muted-foreground">{amanatPending.length} pending</span>}
+          </div>
+          <div className="text-[11px] text-muted-foreground mb-2">
+            They left with us: <b className="text-blue-600">{totalsText(amanatLeft)}</b>
+            {" · "}
+            They took from us: <b className="text-orange-500">{totalsText(amanatTaken)}</b>
+          </div>
+          {amanatPending.map((r) => {
+            const late = isOverdue(r, today);
+            const out = outstandingQty(r);
+            return (
+              <div key={r.id} className="flex items-center justify-between gap-3 text-xs py-2 border-b last:border-0">
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <DirectionChip direction={r.direction} />
+                    <StatusChip row={r} today={today} />
+                    <span className="font-mono text-[10px] text-muted-foreground">{r.amanat_no}</span>
+                  </div>
+                  <div className="font-semibold truncate">
+                    {amanatWhat(r)}
+                    {r.kind !== "money" && out < r.quantity && <span className="font-normal text-muted-foreground"> · {out} still out</span>}
+                  </div>
+                  <div className="text-muted-foreground">
+                    {shortDate(r.given_date)}
+                    {r.expected_return_date && (
+                      <span className={late ? "text-destructive font-semibold" : ""}>
+                        {" · "}{late ? "overdue" : "due"} {shortDate(r.expected_return_date)}
+                      </span>
+                    )}
+                    {r.notes && <span> · {r.notes}</span>}
+                  </div>
+                </div>
+                <Button size="sm" variant="outline" className="shrink-0 h-8" onClick={() => toggleAmanat(r)}>
+                  <PackageCheck className="h-3.5 w-3.5 mr-1" /> Mark received
+                </Button>
+              </div>
+            );
+          })}
+          {amanatSettled.length > 0 && (
+            <>
+              <button type="button" onClick={() => setShowSettled((s) => !s)}
+                      className="mt-1 text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                {showSettled ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                {showSettled ? "Hide" : "Show"} {amanatSettled.length} received
+              </button>
+              {showSettled && amanatSettled.map((r) => (
+                <div key={r.id} className="flex items-center justify-between gap-3 text-xs py-1.5 border-t text-muted-foreground">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <DirectionChip direction={r.direction} />
+                      <StatusChip row={r} today={today} />
+                      <span className="text-foreground">{amanatWhat(r)}</span>
+                    </div>
+                    <div>{shortDate(r.given_date)} → {settledWord(r).toLowerCase()} {shortDate(r.returned_date)}</div>
+                  </div>
+                  <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" title="Reopen (still pending)" onClick={() => toggleAmanat(r)}>
+                    <Undo2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
       {/* One button instead of a permanent form — keeps the account clean to
           read and to screenshot. Everything (sale, payment, credit, debit)
           lives inside the dialog. */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="font-semibold text-sm">Transaction history</div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Dialog open={addOpen} onOpenChange={(o) => { setAddOpen(o); if (o) setForm(blankEntry(kind)); }}>
             <DialogTrigger asChild>
               <Button size="sm"><Plus className="h-4 w-4 mr-1.5" /> Add entry</Button>
@@ -444,6 +561,16 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
               <Button className="w-full mt-1" onClick={add}>Save entry</Button>
             </DialogContent>
           </Dialog>
+          <Dialog open={amanatOpen} onOpenChange={setAmanatOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" variant="outline"><PackageOpen className="h-4 w-4 mr-1.5" /> Add amanat</Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+              <DialogHeader><DialogTitle>Add amanat — {party.name}</DialogTitle></DialogHeader>
+              <AmanatForm partyType={AMANAT_PARTY[kind]} fixedParty={party}
+                          onSaved={() => { setAmanatOpen(false); load(); onChanged(); }} />
+            </DialogContent>
+          </Dialog>
           <Button variant="outline" size="sm" onClick={() => printArea()}>
             <Printer className="h-4 w-4 mr-1.5" /> Print
           </Button>
@@ -455,6 +582,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
           <div className="text-lg font-black">{COMPANY.name} — Account Ledger</div>
           <div className="text-sm">
             {party.name}{party.account_no ? ` (${party.account_no})` : ""} · Balance due {money(current)}
+            {amanatPending.length > 0 ? ` · ${amanatPending.length} amanat pending` : ""}
           </div>
         </div>
 
@@ -591,6 +719,42 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
             })}
           </tbody>
         </table>
+
+        {/* Print: open amanat after the ledger — held in trust, so it is
+            listed beside the balance and never added into it. */}
+        {amanatPending.length > 0 && (
+          <div className="hidden print:block mt-4">
+            <div className="text-sm font-bold border-b pb-1 mb-1">Amanat — held in trust (not in balance)</div>
+            <div className="text-xs mb-1">
+              They left with us: {totalsText(amanatLeft)} · They took from us: {totalsText(amanatTaken)}
+            </div>
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase text-left border-b">
+                <tr>
+                  <th className="p-1.5">Date</th><th className="p-1.5">Ref</th><th className="p-1.5">Direction</th>
+                  <th className="p-1.5">Item / Amount</th><th className="p-1.5 text-center">Qty out</th><th className="p-1.5">Due</th>
+                </tr>
+              </thead>
+              <tbody>
+                {amanatPending.map((r) => (
+                  <tr key={r.id} className="border-t">
+                    <td className="p-1.5 whitespace-nowrap">{shortDate(r.given_date)}</td>
+                    <td className="p-1.5 whitespace-nowrap">{r.amanat_no ?? "—"}</td>
+                    <td className="p-1.5">{r.direction === "left" ? "Left with us" : "Taken from us"}</td>
+                    <td className="p-1.5">
+                      {r.kind === "money" ? money(r.amount) : r.item_name}
+                      {r.notes ? <div className="text-[10px]">{r.notes}</div> : null}
+                    </td>
+                    <td className="p-1.5 text-center">{r.kind === "money" ? "—" : outstandingQty(r)}</td>
+                    <td className="p-1.5 whitespace-nowrap">
+                      {r.expected_return_date ? `${isOverdue(r, today) ? "Overdue " : ""}${shortDate(r.expected_return_date)}` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <InvoiceQuickView invoiceRef={viewInvoice} onClose={() => setViewInvoice(null)} />

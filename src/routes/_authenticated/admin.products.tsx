@@ -1,10 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, localDateOf } from "@/lib/format";
-import { inStockFirst } from "@/lib/pricing";
-import { isTracked, stockOf } from "@/lib/stock";
+import { inStockFirst, normalizeProductName } from "@/lib/pricing";
+import { hiddenFromBrowse, isTracked, stockOf } from "@/lib/stock";
+import { matchesQuery } from "@/lib/search";
+import { findProductByName, type ProductRow } from "@/lib/products";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, X } from "lucide-react";
 import { ImageUpload } from "@/components/admin/ImageUpload";
 import { fetchAll } from "@/lib/fetchAll";
 
@@ -48,7 +50,13 @@ function ProductsAdmin() {
   const [brands, setBrands] = useState<any[]>([]);
   const [form, setForm] = useState<ProductForm>(empty);
   const [editing, setEditing] = useState<string | null>(null);
+  // The name the product had when the edit dialog opened (rename check).
+  const [editingName, setEditingName] = useState("");
   const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  // Browsing hides sold-out products (like the POS); a typed search always
+  // finds them, so re-entering one opens the existing record.
+  const [showOutOfStock, setShowOutOfStock] = useState(false);
   const [saving, setSaving] = useState(false);
   // Create: units on the shelf right now (booked as an "Opening count").
   const [openingStock, setOpeningStock] = useState("");
@@ -78,9 +86,30 @@ function ProductsAdmin() {
   };
   useEffect(() => { load(); }, []);
 
-  const startNew = () => {
-    setEditing(null); setForm(empty); setOpeningStock("");
+  const startNew = (name = "") => {
+    setEditing(null); setEditingName(""); setForm({ ...empty, product_name: name }); setOpeningStock("");
     setCurrentStock(0); setCounted(""); setCountTouched(false); setReason(ADJUST_REASONS[0]); setNote("");
+  };
+
+  // Matching ignores word order and looks at name, category and brand.
+  // Sold-out products (hiddenFromBrowse) are left out while browsing unless
+  // the toggle is on; a typed search always includes them, listed last
+  // (rows are already in-stock first). Untracked services always show.
+  const hiddenCount = useMemo(() => rows.filter(hiddenFromBrowse).length, [rows]);
+  const visible = useMemo(() => {
+    const term = q.trim();
+    if (term) return rows.filter((r) => matchesQuery(`${r.product_name ?? ""} ${r.categories?.name ?? ""} ${r.brands?.name ?? ""}`, term));
+    return showOutOfStock ? rows : rows.filter((r) => !hiddenFromBrowse(r));
+  }, [rows, q, showOutOfStock]);
+  const visibleOut = q.trim() ? visible.filter(hiddenFromBrowse).length : 0;
+
+  // A product that already exists is opened instead of being entered twice.
+  const openExisting = (p: ProductRow) => {
+    toast.info(`"${p.product_name}" already exists — opened it`, {
+      description: "Fix its price or enter a counted stock here and save. New arrivals are booked on Stock Purchases.",
+      duration: 8000,
+    });
+    edit(p);
   };
 
   const save = async () => {
@@ -118,6 +147,14 @@ function ProductsAdmin() {
 
     if (editing) {
       if (stockDelta !== 0 && countedN < 0) return toast.error("Counted stock cannot be negative");
+      // A rename may not land on another product's name (any spacing/case):
+      // that would make two records for one product.
+      if (normalizeProductName(name) !== normalizeProductName(editingName)) {
+        const clash = await findProductByName(name).catch(() => null);
+        if (clash && clash.id !== editing) {
+          return toast.error(`"${clash.product_name}" already exists — use that product, or choose a different name`);
+        }
+      }
       const { data, error } = await supabase.from("products").update(payload).eq("id", editing).select("id").maybeSingle();
       if (error) return toast.error(describe(error));
       if (!data) return toast.error("Product not found — refresh the page");
@@ -142,8 +179,19 @@ function ProductsAdmin() {
     } else {
       const opening = form.track_stock ? Math.round(Number(openingStock) || 0) : 0;
       if (opening < 0) return toast.error("Opening stock cannot be negative");
+      // Re-entering a product that already exists — sold out and hidden, or
+      // typed with different spacing/case — must not create a second record.
+      // (If the lookup fails, the unique name index below is the backstop.)
+      const existing = await findProductByName(name).catch(() => null);
+      if (existing) return openExisting(existing);
       const { data, error } = await supabase.from("products").insert({ ...payload, quantity_in_stock: 0 }).select("id").maybeSingle();
-      if (error) return toast.error(describe(error));
+      if (error) {
+        if (error.code === "23505") {
+          const again = await findProductByName(name).catch(() => null);
+          if (again) return openExisting(again);
+        }
+        return toast.error(describe(error));
+      }
       if (!data) return toast.error("Could not create product");
       if (opening > 0) {
         const { error: adjErr } = await supabase.from("stock_adjustments").insert({
@@ -160,10 +208,42 @@ function ProductsAdmin() {
     setOpen(false); startNew(); load();
   };
 
-  const remove = async (id: string) => {
-    if (!confirm("Delete this product?")) return;
+  // A product with sales or purchase history is kept for the records (its
+  // sale lines, purchases and sales history would lose their product): it
+  // stays hidden while out of stock and comes back when restocked. One with
+  // no history at all can go. The database refuses the first kind too
+  // (products_keep_history) — its message is shown if it ever has to.
+  const remove = async (r: any) => {
+    const id: string = r.id;
+    const name: string = r.product_name ?? "This product";
+    const head = { count: "exact" as const, head: true };
+    const [ii, sp, cp, qi, ai] = await Promise.all([
+      supabase.from("invoice_items").select("id", head).eq("product_id", id),
+      supabase.from("stock_purchases").select("id", head).eq("product_id", id),
+      supabase.from("customer_purchases").select("id", head).eq("product_id", id),
+      supabase.from("quotation_items").select("id", head).eq("product_id", id),
+      supabase.from("amanat_items").select("id", head).eq("product_id", id),
+    ]);
+    const n = (res: { count: number | null }) => res.count ?? 0;
+    // Sale lines and sales-history rows record the same sales.
+    const sales = Math.max(n(ii), n(cp));
+    const purchases = n(sp), quotes = n(qi), amanat = n(ai);
+    if (sales + purchases + quotes + amanat > 0) {
+      const plural = (k: number, one: string, many = `${one}s`) => `${k} ${k === 1 ? one : many}`;
+      const parts = [
+        sales > 0 && plural(sales, "sale"),
+        purchases > 0 && plural(purchases, "purchase"),
+        quotes > 0 && plural(quotes, "quotation"),
+        amanat > 0 && plural(amanat, "amanat entry", "amanat entries"),
+      ].filter(Boolean).join(" / ");
+      return toast.error(`"${name}" has ${parts} — kept for the records; it is hidden while out of stock and comes back when restocked.`, { duration: 8000 });
+    }
+    const units = isTracked(r) ? stockOf(r) : 0;
+    if (!confirm(units > 0
+      ? `Delete "${name}"? It has no sales or purchases; its stock count (${units}) is deleted with it.`
+      : `Delete "${name}"? It has no sales or purchase history.`)) return;
     const { error } = await supabase.from("products").delete().eq("id", id);
-    if (error) return toast.error(error.message);
+    if (error) return toast.error(error.message, { duration: 8000 });
     toast.success("Deleted"); load();
   };
 
@@ -171,6 +251,7 @@ function ProductsAdmin() {
   // categories/brands objects, id or created_at (PostgREST rejects them).
   const edit = (r: any) => {
     setEditing(r.id);
+    setEditingName(r.product_name ?? "");
     setForm({
       product_name: r.product_name ?? "", description: r.description ?? "", image_url: r.image_url ?? "",
       category_id: r.category_id ?? "", subcategory_id: r.subcategory_id ?? "", brand_id: r.brand_id ?? "",
@@ -195,11 +276,23 @@ function ProductsAdmin() {
 
   return (
     <AdminShell title="Products">
-      <div className="flex justify-end mb-4">
+      {/* Search gets the full row with "Add product" beside it. */}
+      <div className="flex gap-2 mb-2">
+        <div className="relative flex-1 min-w-0">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Search name, category or brand… (any word order)" value={q}
+                 onChange={(e) => setQ(e.target.value)} className="pl-9 pr-9 h-11 w-full" />
+          {q && (
+            <button type="button" onClick={() => setQ("")} aria-label="Clear search"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground">
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button onClick={startNew}>
-              <Plus className="h-4 w-4 mr-2" /> Add product
+            <Button className="h-11 shrink-0" onClick={() => startNew()}>
+              <Plus className="h-4 w-4 mr-1.5" /> Add product
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -318,6 +411,22 @@ function ProductsAdmin() {
         </Dialog>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        {(hiddenCount > 0 || showOutOfStock) && (
+          <Button variant={showOutOfStock ? "secondary" : "outline"} size="sm" onClick={() => setShowOutOfStock((v) => !v)}
+                  title="Browse out-of-stock products too (a search always finds them)">
+            {showOutOfStock ? "Hide out of stock" : `Show out of stock (${hiddenCount})`}
+          </Button>
+        )}
+        <span className="text-xs text-muted-foreground">
+          {q.trim()
+            ? `${visible.length} match${visible.length === 1 ? "" : "es"}${visibleOut > 0 ? ` · ${visibleOut} out of stock, listed last` : ""}`
+            : showOutOfStock
+              ? `Showing all ${rows.length} products${hiddenCount > 0 ? ` · ${hiddenCount} out of stock, listed last` : ""}`
+              : `Showing ${visible.length} product${visible.length === 1 ? "" : "s"}${hiddenCount > 0 ? ` · ${hiddenCount} out of stock hidden` : ""}`}
+        </span>
+      </div>
+
       <div className="rounded-2xl bg-card shadow-sm overflow-x-auto">
         <table className="w-full min-w-[640px] text-sm">
           <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
@@ -327,7 +436,7 @@ function ProductsAdmin() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {visible.map((r) => (
               <tr key={r.id} className="border-t">
                 <td className="p-3 font-medium">
                   <div className="flex items-center gap-3">
@@ -355,11 +464,22 @@ function ProductsAdmin() {
                 <td className="p-3 font-semibold">{money(r.selling_price)}</td>
                 <td className="p-3 text-right">
                   <Button variant="ghost" size="icon" onClick={() => edit(r)}><Pencil className="h-4 w-4" /></Button>
-                  <Button variant="ghost" size="icon" onClick={() => remove(r.id)}><Trash2 className="h-4 w-4" /></Button>
+                  <Button variant="ghost" size="icon" onClick={() => remove(r)}><Trash2 className="h-4 w-4" /></Button>
                 </td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={6} className="p-10 text-center text-muted-foreground">No products yet.</td></tr>}
+            {visible.length === 0 && (
+              <tr><td colSpan={6} className="p-10 text-center text-muted-foreground">
+                {rows.length === 0 ? "No products yet." : q.trim() ? (
+                  <div className="space-y-2">
+                    <div>No product matches “{q.trim()}”.</div>
+                    <Button variant="outline" size="sm" onClick={() => { startNew(q.trim().replace(/\s+/g, " ")); setOpen(true); }}>
+                      <Plus className="h-4 w-4 mr-1" /> Add “{q.trim()}” as a new product
+                    </Button>
+                  </div>
+                ) : "Every product is out of stock — tap “Show out of stock” or search by name."}
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>

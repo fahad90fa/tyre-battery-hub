@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
 import { effectivePrice, inStockFirst } from "@/lib/pricing";
-import { inStock, isTracked, stockOf, stockLabel } from "@/lib/stock";
+import { hiddenFromBrowse, inStock, isTracked, stockOf, stockLabel } from "@/lib/stock";
 import { getOrCreateProduct, confirmStockForSale } from "@/lib/products";
 import { matchesQuery } from "@/lib/search";
 import { printArea } from "@/lib/print";
@@ -219,13 +219,16 @@ function PosPage() {
   };
 
   const stockUnits = matches.reduce((a, p) => a + (isTracked(p) ? Math.max(0, stockOf(p)) : 0), 0);
-  // The printed sheet ignores the browse toggle: with no search it lists
-  // every product, zero-stock lines included — a stock-take needs those.
-  const printList = useMemo(
+  // The printed sheet is what is on the shelf (narrowed by the search, if
+  // any): stock-tracked products with units in stock. Sold-out products are
+  // only counted in the footer and services/trade-ins are never on a shelf.
+  const printScope = useMemo(
     () => (q.trim() ? products.filter((p) => matchesQuery(p.product_name, q)) : products),
     [products, q],
   );
-  const printUnits = printList.reduce((a, p) => a + (isTracked(p) ? Math.max(0, stockOf(p)) : 0), 0);
+  const printList = useMemo(() => printScope.filter((p) => isTracked(p) && stockOf(p) > 0), [printScope]);
+  const printOutOfStock = printScope.filter(hiddenFromBrowse).length;
+  const printUnits = printList.reduce((a, p) => a + stockOf(p), 0);
 
   return (
     <AdminShell title="Quick Sale (POS)">
@@ -245,7 +248,7 @@ function PosPage() {
                 {showOutOfStock ? "Hide out of stock" : "Show out of stock"}
               </Button>
               <Button variant="outline" size="sm" onClick={() => setStockPrint(true)}
-                      title="Print the stock list currently matching the search">
+                      title="Print the products in stock (matching the search, if any)">
                 <Printer className="h-4 w-4 mr-2" /> Print stock list
               </Button>
             </div>
@@ -471,7 +474,7 @@ function PosPage() {
               <div className="text-lg font-black">{COMPANY.name} — Stock List</div>
               <div className="text-sm">
                 {shortDate(localToday())}
-                {q.trim() ? ` · search: “${q.trim()}”` : " · all products"}
+                {q.trim() ? ` · search: “${q.trim()}”` : " · products in stock"}
                 {` · ${printList.length} product${printList.length === 1 ? "" : "s"} · ${printUnits} unit${printUnits === 1 ? "" : "s"}`}
               </div>
             </div>
@@ -493,7 +496,7 @@ function PosPage() {
                     <td className="py-1.5 pr-2">{i + 1}</td>
                     <td className="py-1.5 pr-2">{p.product_name}</td>
                     <td className="py-1.5 pr-2 text-right">{money(effectivePrice(p))}</td>
-                    <td className="py-1.5 text-right font-semibold">{!isTracked(p) ? "—" : stockOf(p) > 0 ? stockOf(p) : "Out of stock"}</td>
+                    <td className="py-1.5 text-right font-semibold">{stockOf(p)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -502,6 +505,13 @@ function PosPage() {
                   <td className="py-2" colSpan={3}>Total units</td>
                   <td className="py-2 text-right">{printUnits}</td>
                 </tr>
+                {printOutOfStock > 0 && (
+                  <tr>
+                    <td className="pt-1 text-xs" colSpan={4}>
+                      {printOutOfStock} out-of-stock product{printOutOfStock === 1 ? "" : "s"} not listed
+                    </td>
+                  </tr>
+                )}
               </tfoot>
             </table>
           </div>
