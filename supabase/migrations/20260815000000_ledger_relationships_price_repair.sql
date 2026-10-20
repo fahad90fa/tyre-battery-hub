@@ -91,10 +91,9 @@ from (
 where sp.product_id = p.id
   and coalesce(p.purchase_price, 0) = 0;
 
-update public.products
-set selling_price = purchase_price
-where coalesce(selling_price, 0) = 0
-  and coalesce(purchase_price, 0) > 0;
+-- (The old step that copied the cost into a blank selling price is gone: the
+--  POS already falls back to cost for display, and copying it made every
+--  later restock overwrite the shop price. The Products page owns prices.)
 
 -- 4. PostgREST re-reads the schema so the new relationships work immediately.
 notify pgrst, 'reload schema';

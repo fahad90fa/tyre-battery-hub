@@ -12,6 +12,7 @@ import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Copy, Search } from "lucide-react";
 import { ImageUpload } from "@/components/admin/ImageUpload";
+import { getOrCreateProduct } from "@/lib/products";
 
 export const Route = createFileRoute("/_authenticated/admin/templates")({
   component: TemplatesAdmin,
@@ -52,21 +53,24 @@ function TemplatesAdmin() {
   };
   const edit = (r: any) => { setEditing(r.id); setForm({ ...empty, ...r, category_id: r.category_id ?? "" }); setOpen(true); };
 
+  // A template never creates a second copy of a product that already
+  // carries its name — the existing one is reported instead.
   const useTemplate = async (t: any) => {
-    const { error } = await supabase.from("products").insert({
-      product_name: t.name, description: t.description, image_url: t.image_url,
-      category_id: t.category_id, selling_price: t.default_price, purchase_price: 0, quantity_in_stock: 0,
+    const { product, created, error } = await getOrCreateProduct(t.name, {
+      description: t.description, image_url: t.image_url,
+      category_id: t.category_id, selling_price: Math.round(Number(t.default_price) || 0), purchase_price: 0,
     });
-    if (error) return toast.error(error.message);
-    toast.success("Product created from template");
+    if (error || !product) return toast.error(error ?? "Could not create product");
+    if (created) toast.success(`Product "${product.product_name}" created from template`);
+    else toast.info(`"${product.product_name}" already exists — no duplicate created`);
   };
 
   const filtered = rows.filter((r) => !q || (r.name + " " + (r.categories?.name ?? "")).toLowerCase().includes(q.toLowerCase()));
 
   return (
     <AdminShell title="Templates">
-      <div className="flex items-center justify-between mb-4 gap-3">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input placeholder="Search templates..." value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
         </div>

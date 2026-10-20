@@ -5,6 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel, summarizeMethods, paymentStatus } from "@/lib/payments";
 import { effectivePrice, inStockFirst, toPaisa } from "@/lib/pricing";
+import { stockLabel } from "@/lib/stock";
+import { getOrCreateProduct, confirmStockForSale } from "@/lib/products";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,7 +43,7 @@ function CustomersAdmin() {
   const load = async () => {
     const [{ data: r }, { data: p }, { data: c }] = await Promise.all([
       fetchAll((a, b) => supabase.from("customer_purchases").select("*, products(product_name)").order("created_at", { ascending: false }).order("id").range(a, b)),
-      fetchAll((a, b) => supabase.from("products").select("id, product_name, selling_price, purchase_price, quantity_in_stock").order("id").range(a, b)),
+      fetchAll((a, b) => supabase.from("products").select("id, product_name, selling_price, purchase_price, quantity_in_stock, track_stock").order("id").range(a, b)),
       supabase.from("clients").select("id, name, account_no, current_balance").order("name"),
     ]);
     setRows(r ?? []); setProducts(p ?? []); setClients(c ?? []);
@@ -69,6 +71,9 @@ function CustomersAdmin() {
 
     setSaving(true);
     try {
+      // Live stock check — the product list may be stale; selling past zero needs a yes.
+      if (!(await confirmStockForSale([{ product_id: form.product_id, qty }]))) return;
+
       const { error } = await supabase.from("customer_purchases").insert({
         customer_name: custName, product_id: form.product_id,
         quantity_purchased: qty, total_price: total,
@@ -80,12 +85,8 @@ function CustomersAdmin() {
       });
       if (error) return toast.error(error.message);
 
-      if (prod) {
-        await supabase.from("products")
-          .update({ quantity_in_stock: Math.max(0, prod.quantity_in_stock - qty) })
-          .eq("id", prod.id);
-      }
-
+      // Stock comes off products.quantity_in_stock through the invoice_items
+      // trigger below — nothing is written to the product here.
       const invId = "INV-" + Date.now();
       const { data: inv, error: invErr } = await supabase.from("invoices").insert({
         invoice_id: invId, customer_name: custName, total_amount: total,
@@ -172,7 +173,7 @@ function CustomersAdmin() {
             <SearchableSelect
               options={inStockFirst(products).map((p) => ({
                 value: p.id, label: p.product_name,
-                hint: `${money(effectivePrice(p))} · ${p.quantity_in_stock} in stock`,
+                hint: `${money(effectivePrice(p))} · ${stockLabel(p)}`,
               }))}
               value={form.product_id}
               onValueChange={(v) => {
@@ -182,15 +183,17 @@ function CustomersAdmin() {
               placeholder="Select product"
               searchPlaceholder="Search or type new product name..."
               onCreate={async (name) => {
-                const { data, error } = await supabase.from("products")
-                  .insert({ product_name: name, quantity_in_stock: 0, purchase_price: 0, selling_price: 0 })
-                  .select().maybeSingle();
-                if (error) return toast.error(error.message);
-                if (data) {
-                  setProducts((ps: any[]) => [...ps, data]);
-                  setForm((f: any) => ({ ...f, product_id: data.id, total_price: 0 }));
-                  toast.success(`New product "${name}" added — set its price in the Total box`);
-                }
+                // Reuse an existing product with the same name (any spacing/case).
+                const { product, created, error } = await getOrCreateProduct(name);
+                if (error || !product) return toast.error(error ?? "Could not add product");
+                setProducts((ps: any[]) => (ps.some((p) => p.id === product.id) ? ps : [...ps, product]));
+                setForm((f: any) => ({
+                  ...f, product_id: product.id,
+                  total_price: created ? 0 : effectivePrice(product) * (Number(f.quantity_purchased) || 1),
+                }));
+                toast.success(created
+                  ? `New product "${product.product_name}" added — set its price in the Total box`
+                  : `"${product.product_name}" already exists — selected it`);
               }}
               createLabel="Add new product"
             />

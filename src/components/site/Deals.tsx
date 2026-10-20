@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { money } from "@/lib/format";
+import { inStock, isTracked } from "@/lib/stock";
 
 function useCountdown(target: number | null) {
   const [now, setNow] = useState(() => Date.now());
@@ -22,8 +23,12 @@ function useCountdown(target: number | null) {
 
 type Deal = {
   id: string; product_name: string; image_url: string | null;
-  selling_price: number | null; quantity_in_stock: number | null; deal_end_date: string | null;
+  selling_price: number | null; quantity_in_stock: number | null; track_stock: boolean | null;
+  deal_end_date: string | null;
 };
+
+/** Website rule: tracked, units on hand and priced — a deal nobody can buy is not shown. */
+const showable = (p: Deal) => isTracked(p) && inStock(p) && Number(p.selling_price) > 0;
 
 /**
  * "Deal of the day" products — whatever the admin ticks as a deal on the
@@ -35,15 +40,16 @@ export function Deals() {
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from("products")
-        .select("id, product_name, image_url, selling_price, quantity_in_stock, deal_end_date")
+        .select("id, product_name, image_url, selling_price, quantity_in_stock, track_stock, deal_end_date")
         .eq("is_deal", true)
+        .eq("track_stock", true).gt("quantity_in_stock", 0).gt("selling_price", 0)
         // Expired deals stay ticked until the admin unticks them; keep them
         // out of the query so they can't crowd live deals out of the limit.
         .or(`deal_end_date.is.null,deal_end_date.gt.${new Date().toISOString()}`)
         .order("deal_end_date", { ascending: true, nullsFirst: false })
         .limit(10);
       const now = Date.now();
-      setDeals((data ?? []).filter((p) => !p.deal_end_date || new Date(p.deal_end_date).getTime() > now));
+      setDeals((data ?? []).filter((p) => showable(p) && (!p.deal_end_date || new Date(p.deal_end_date).getTime() > now)));
     })();
   }, []);
 
@@ -88,8 +94,8 @@ export function Deals() {
               <div className="font-semibold truncate">{p.product_name}</div>
               <div className="flex items-center justify-between mt-1">
                 <span className="text-primary font-bold">{money(p.selling_price)}</span>
-                <span className={`text-[11px] ${(p.quantity_in_stock ?? 0) > 0 ? "text-green-600" : "text-destructive"}`}>
-                  {(p.quantity_in_stock ?? 0) > 0 ? "In stock" : "Out of stock"}
+                <span className={`text-[11px] ${inStock(p) ? "text-green-600" : "text-destructive"}`}>
+                  {inStock(p) ? "In stock" : "Out of stock"}
                 </span>
               </div>
             </div>

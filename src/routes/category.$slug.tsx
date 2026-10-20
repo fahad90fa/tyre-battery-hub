@@ -3,11 +3,14 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteShell } from "@/components/site/SiteShell";
 import { money } from "@/lib/format";
-import { inStockFirst } from "@/lib/pricing";
+import { inStock, isTracked } from "@/lib/stock";
 
 export const Route = createFileRoute("/category/$slug")({
   component: CategoryPage,
 });
+
+/** Website rule: tracked, units on hand and priced — nothing else is listed. */
+const showable = (p: any) => isTracked(p) && inStock(p) && Number(p.selling_price) > 0;
 
 function CategoryPage() {
   const { slug } = Route.useParams();
@@ -19,8 +22,10 @@ function CategoryPage() {
       const { data: c } = await supabase.from("categories").select("*").eq("slug", slug).maybeSingle();
       setCat(c);
       if (c) {
-        const { data: p } = await supabase.from("products").select("*").eq("category_id", c.id);
-        setProducts(inStockFirst(p ?? []));
+        const { data: p } = await supabase.from("products").select("*").eq("category_id", c.id)
+          .eq("track_stock", true).gt("quantity_in_stock", 0).gt("selling_price", 0)
+          .order("product_name");
+        setProducts((p ?? []).filter(showable));
       }
     })();
   }, [slug]);
@@ -32,7 +37,7 @@ function CategoryPage() {
         <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
           {products.length === 0 && (
             <div className="col-span-full rounded-2xl bg-card p-16 text-center text-muted-foreground">
-              No products in this category yet.
+              No products available in this category right now.
             </div>
           )}
           {products.map((p) => (

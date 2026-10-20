@@ -2,6 +2,7 @@ create extension if not exists pgcrypto;
 
 drop table if exists public.customer_purchases cascade;
 drop table if exists public.invoice_payments cascade;
+drop table if exists public.stock_adjustments cascade;
 drop table if exists public.invoice_items cascade;
 drop table if exists public.invoices cascade;
 drop table if exists public.stock_purchases cascade;
@@ -78,7 +79,8 @@ create table public.products (
   id uuid primary key default gen_random_uuid(),
   purchase_price numeric,
   product_name text,
-  quantity_in_stock integer,
+  quantity_in_stock integer not null default 0,
+  track_stock boolean not null default true,
   description text,
   brand_id uuid references public.brands(id) on delete set null,
   subcategory_id uuid,
@@ -137,10 +139,22 @@ create table public.invoice_items (
   product_name text,
   unit_price numeric,
   quantity integer,
-  product_id uuid,
+  product_id uuid references public.products(id) on delete set null,
   invoice_id uuid references public.invoices(id) on delete cascade,
   id uuid primary key default gen_random_uuid(),
   cost_price numeric
+);
+
+-- Counts and corrections; with stock_purchases (in) and invoice_items (out)
+-- these ledgers are the truth for products.quantity_in_stock, which the
+-- stock_ledger_* triggers (migration 20261015) keep in step.
+create table public.stock_adjustments (
+  id uuid primary key default gen_random_uuid(),
+  product_id uuid not null references public.products(id) on delete cascade,
+  delta integer not null,
+  reason text not null default 'Correction',
+  note text,
+  created_at timestamptz not null default now()
 );
 
 create table public.invoice_payments (
@@ -296,6 +310,9 @@ create index if not exists stock_purchases_reference_idx on public.stock_purchas
 create index if not exists stock_purchases_merchant_id_idx on public.stock_purchases (merchant_id);
 create index if not exists quotation_items_quotation_id_idx on public.quotation_items (quotation_id);
 create index if not exists invoice_payments_invoice_id_idx on public.invoice_payments (invoice_id);
+create index if not exists invoice_items_product_id_idx on public.invoice_items (product_id);
+create index if not exists stock_purchases_product_id_idx on public.stock_purchases (product_id);
+create index if not exists stock_adjustments_product_id_idx on public.stock_adjustments (product_id);
 create index if not exists invoice_payments_payment_date_idx on public.invoice_payments (payment_date);
 create index if not exists invoices_client_id_idx on public.invoices (client_id);
 create index if not exists client_ledger_client_id_idx on public.client_ledger (client_id);

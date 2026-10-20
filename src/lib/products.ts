@@ -1,0 +1,96 @@
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+import { normalizeProductName } from "@/lib/pricing";
+import { isTracked } from "@/lib/stock";
+
+export type ProductRow = Database["public"]["Tables"]["products"]["Row"];
+type ProductInsert = Database["public"]["Tables"]["products"]["Insert"];
+
+/**
+ * The product whose normalised name equals `name`, or null. The database is
+ * asked for a loose ILIKE match (every word of the name, in order, with
+ * anything in between) and the exact comparison happens here, so spacing
+ * and case differences still find the one product.
+ */
+export async function findProductByName(name: string): Promise<ProductRow | null> {
+  const norm = normalizeProductName(name);
+  if (!norm) return null;
+  // Only letters/digits go into the pattern; punctuation becomes a wildcard,
+  // so nothing needs LIKE-escaping and over-matching is harmless.
+  const words = norm.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (words.length === 0) return null;
+  const { data, error } = await supabase.from("products").select("*")
+    .ilike("product_name", `%${words.join("%")}%`).limit(500);
+  if (error) throw error;
+  return (data ?? []).find((p) => normalizeProductName(p.product_name) === norm) ?? null;
+}
+
+/**
+ * Quick-add from a picker: reuse the product that already carries this name,
+ * otherwise create it. A race with another device (unique-name violation
+ * 23505) is resolved by fetching the row the other device created.
+ * Stock always starts at 0 — purchases and adjustments move it.
+ */
+export async function getOrCreateProduct(
+  name: string,
+  extra: Omit<ProductInsert, "product_name" | "quantity_in_stock"> = {},
+): Promise<{ product: ProductRow | null; created: boolean; error: string | null }> {
+  const clean = name.trim().replace(/\s+/g, " ");
+  if (!clean) return { product: null, created: false, error: "Product name required" };
+  try {
+    const existing = await findProductByName(clean);
+    if (existing) return { product: existing, created: false, error: null };
+    const { data, error } = await supabase.from("products")
+      .insert({ purchase_price: 0, selling_price: 0, ...extra, product_name: clean, quantity_in_stock: 0 })
+      .select().maybeSingle();
+    if (error) {
+      if (error.code === "23505") {
+        const again = await findProductByName(clean);
+        if (again) return { product: again, created: false, error: null };
+        return { product: null, created: false, error: "A product with this name already exists" };
+      }
+      return { product: null, created: false, error: error.message };
+    }
+    if (!data) return { product: null, created: false, error: "Could not create product" };
+    return { product: data, created: true, error: null };
+  } catch (err) {
+    return { product: null, created: false, error: err instanceof Error ? err.message : "Could not look up product" };
+  }
+}
+
+/**
+ * Sale-time stock check. Re-reads the live stock for the lines about to be
+ * sold (the page's product list may be minutes old) and, when any line
+ * sells more than is in stock, asks the cashier to confirm. Returns true to
+ * go ahead. Selling past zero is allowed — the purchase may simply not be
+ * booked yet — but never silently. Untracked products (track_stock = false:
+ * services, trade-ins, consumables) are skipped.
+ */
+export async function confirmStockForSale(lines: Array<{ product_id: string | null | undefined; qty: number }>): Promise<boolean> {
+  const wanted = new Map<string, number>();
+  for (const l of lines) {
+    if (!l.product_id) continue;
+    wanted.set(l.product_id, (wanted.get(l.product_id) ?? 0) + (Number(l.qty) || 0));
+  }
+  if (wanted.size === 0) return true;
+  const { data, error } = await supabase.from("products")
+    .select("id, product_name, quantity_in_stock, track_stock").in("id", [...wanted.keys()]);
+  if (error) {
+    window.alert(`Could not check stock before saving: ${error.message}`);
+    return false;
+  }
+  const shortfalls: string[] = [];
+  for (const p of data ?? []) {
+    if (!isTracked(p)) continue; // services / trade-ins: always sellable, never checked
+    const qty = wanted.get(p.id) ?? 0;
+    const stock = Number(p.quantity_in_stock) || 0;
+    if (qty > stock) {
+      const oversold = stock < 0 ? ` (already ${-stock} oversold)` : "";
+      shortfalls.push(`${p.product_name}: only ${Math.max(0, stock)} in stock${oversold}, selling ${qty}.`);
+    }
+  }
+  if (shortfalls.length === 0) return true;
+  return window.confirm(
+    `${shortfalls.join("\n")}\n\nContinue? Stock will go below zero until the purchase is booked.`,
+  );
+}

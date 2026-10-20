@@ -1,3 +1,5 @@
+import { inStock, type StockFields } from "@/lib/stock";
+
 /**
  * Percentage-based price adjustment: products carry a company/base price and
  * a bill can add or deduct a percentage per transaction.
@@ -34,13 +36,14 @@ export const impliedPct = (base: number, price: number) =>
  * be sold is always in front. Alphabetical within each group unless a
  * different tiebreak (e.g. newest first) is given. Returns a copy.
  */
-export const inStockFirst = <T extends { quantity_in_stock?: number | string | null; product_name?: string | null }>(
+export const inStockFirst = <T extends StockFields & { product_name?: string | null }>(
   list: T[],
   tiebreak: (a: T, b: T) => number = (a, b) => (a.product_name ?? "").localeCompare(b.product_name ?? ""),
 ): T[] =>
   [...list].sort((a, b) => {
-    const inA = (Number(a.quantity_in_stock) || 0) > 0;
-    const inB = (Number(b.quantity_in_stock) || 0) > 0;
+    // Untracked products (services, trade-ins) are always sellable.
+    const inA = inStock(a);
+    const inB = inStock(b);
     if (inA !== inB) return inA ? -1 : 1;
     return tiebreak(a, b);
   });
@@ -55,3 +58,11 @@ export const effectivePrice = (p: { selling_price?: number | string | null; purc
   const sell = Number(p.selling_price) || 0;
   return sell > 0 ? toPaisa(sell) : toPaisa(p.purchase_price);
 };
+
+/**
+ * One product name per product: trim, collapse whitespace, lower-case.
+ * Matches the normalised unique index on `products.product_name`, so a
+ * quick-add that spells an existing name differently reuses that product.
+ */
+export const normalizeProductName = (name: string | null | undefined) =>
+  (name ?? "").trim().replace(/\s+/g, " ").toLowerCase();

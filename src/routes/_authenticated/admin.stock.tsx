@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/admin/SearchableSelect";
 import { applyPct, inStockFirst, sumMoney } from "@/lib/pricing";
+import { stockLabel } from "@/lib/stock";
+import { getOrCreateProduct } from "@/lib/products";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 import { fetchAll } from "@/lib/fetchAll";
@@ -39,7 +41,7 @@ function StockAdmin() {
   const load = async () => {
     const [{ data: r, error: rErr }, { data: p }, { data: m }] = await Promise.all([
       fetchAll((a, b) => supabase.from("stock_purchases").select("*, products(product_name)").order("date", { ascending: false }).order("created_at", { ascending: false }).order("id").range(a, b)),
-      fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price, selling_price").order("id").range(a, b)),
+      fetchAll((a, b) => supabase.from("products").select("id, product_name, quantity_in_stock, purchase_price, selling_price, track_stock").order("id").range(a, b)),
       supabase.from("merchants").select("id, name, account_no").order("name"),
     ]);
     // An empty list used to look identical to a failed query. Say which it is.
@@ -54,18 +56,22 @@ function StockAdmin() {
   const setLineByUid = (uid: string, patch: Partial<PurchaseLine>) =>
     setLines((ls) => ls.map((l) => (l.uid === uid ? { ...l, ...patch } : l)));
 
-  // Instantly create a brand-new product from the picker (first-time arrivals).
+  // Instantly create a brand-new product from the picker (first-time
+  // arrivals). A name that already exists (any spacing/case) reuses that
+  // product instead of creating a second copy.
   const createProduct = async (uid: string, name: string) => {
-    const { data, error } = await supabase.from("products")
-      .insert({ product_name: name, quantity_in_stock: 0, purchase_price: 0, selling_price: 0 })
-      .select().maybeSingle();
-    if (error) return toast.error(error.message);
-    if (data) {
-      setProducts((ps) => [...ps, data]);
+    const { product, created, error } = await getOrCreateProduct(name);
+    if (error || !product) return toast.error(error ?? "Could not add product");
+    setProducts((ps) => (ps.some((p) => p.id === product.id) ? ps : [...ps, product]));
+    if (created) {
       // A brand-new product has no price yet — clear any price left over from
       // the product previously chosen on this line.
-      setLineByUid(uid, { product_id: data.id, base: 0, pct: 0, unit_cost: 0 });
-      toast.success(`New product "${name}" added — enter its base price below`);
+      setLineByUid(uid, { product_id: product.id, base: 0, pct: 0, unit_cost: 0 });
+      toast.success(`New product "${product.product_name}" added — enter the merchant cost below`);
+    } else {
+      const base = Number(product.purchase_price) || Number(product.selling_price) || 0;
+      setLineByUid(uid, { product_id: product.id, base, pct: 0, unit_cost: base });
+      toast.success(`"${product.product_name}" already exists — selected it`);
     }
   };
 
@@ -91,7 +97,7 @@ function StockAdmin() {
     if (lines.some((l) => l.product_id && !(Number.isInteger(Number(l.quantity)) && Number(l.quantity) > 0)))
       return toast.error("Enter a whole quantity of 1 or more for every item line");
     if (valid.some((l) => !(finalOf(l) > 0)))
-      return toast.error("Enter a base / list price for every item line");
+      return toast.error("Enter the merchant cost for every item line");
     const supplier = supplierName || merchants.find((m) => m.id === merchantId)?.name || "";
     const validTotal = sumMoney(valid.map((l) => Number(l.quantity) * finalOf(l)));
 
@@ -105,33 +111,30 @@ function StockAdmin() {
       })));
       if (error) return toast.error(error.message);
 
-      // Aggregate per product so the same product on two lines adds both quantities.
-      const byProduct = new Map<string, { qty: number; unit_cost: number }>();
-      for (const l of valid) {
-        const cur = byProduct.get(l.product_id);
-        byProduct.set(l.product_id, { qty: (cur?.qty ?? 0) + Number(l.quantity), unit_cost: finalOf(l) });
-      }
-      for (const [productId, { qty, unit_cost }] of byProduct) {
+      // The stock count itself is the database's job: the stock_purchases
+      // trigger has already added these units to products.quantity_in_stock.
+      // Here only the latest merchant cost and purchase date are recorded —
+      // the last line for a product wins when it appears twice.
+      const byProduct = new Map<string, number>();
+      for (const l of valid) byProduct.set(l.product_id, finalOf(l));
+      for (const [productId, unit_cost] of byProduct) {
         const name = products.find((p) => p.id === productId)?.product_name ?? "product";
-        // Fresh read — the page may have been open a while, and a stale row
-        // here would overwrite stock counts (or a just-set selling price).
+        // Fresh read — the page may have been open a while and a selling
+        // price set meanwhile must not be missed.
         const { data: prod } = await supabase.from("products")
-          .select("quantity_in_stock, selling_price, purchase_price").eq("id", productId).maybeSingle();
+          .select("selling_price").eq("id", productId).maybeSingle();
         if (prod) {
-          const upd: { quantity_in_stock: number; purchase_price: number; last_purchase_date: string; selling_price?: number } = {
-            quantity_in_stock: (Number(prod.quantity_in_stock) || 0) + qty,
+          const upd: { purchase_price: number; last_purchase_date: string; selling_price?: number } = {
             purchase_price: unit_cost,
             last_purchase_date: date,
           };
-          // A product with no selling price would ring up as Rs 0 in the POS,
-          // so it gets the purchase price on arrival. It keeps tracking the
-          // cost while nobody has changed it by hand (selling == old cost) —
-          // otherwise a costlier restock would silently sell below cost. A
-          // manually set selling price is never touched.
-          const oldSell = Number(prod.selling_price) || 0;
-          if (!(oldSell > 0) || oldSell === (Number(prod.purchase_price) || 0)) upd.selling_price = unit_cost;
+          // products.selling_price is the shop price and the only source of
+          // it. A product that has never been given one would ring up as
+          // Rs 0 in the POS, so it starts at the merchant cost on first
+          // arrival — and is never touched again by a restock.
+          if (!(Number(prod.selling_price) > 0)) upd.selling_price = Math.round(unit_cost);
           const { error: updErr } = await supabase.from("products").update(upd).eq("id", productId);
-          if (updErr) toast.error(`Stock count update failed for ${name}: ${updErr.message}`);
+          if (updErr) toast.error(`Cost update failed for ${name}: ${updErr.message}`);
         }
       }
 
@@ -193,7 +196,7 @@ function StockAdmin() {
                 <div className="flex gap-1.5 items-center">
                   <div className="flex-1 min-w-0">
                     <SearchableSelect
-                      options={inStockFirst(products).map((p) => ({ value: p.id, label: p.product_name, hint: `stock ${p.quantity_in_stock}` }))}
+                      options={inStockFirst(products).map((p) => ({ value: p.id, label: p.product_name, hint: stockLabel(p) }))}
                       value={l.product_id}
                       onValueChange={(v) => {
                         const p = products.find((x) => x.id === v);
@@ -216,7 +219,7 @@ function StockAdmin() {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Base / list price (Rs)</Label>
+                    <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Merchant cost / unit (Rs)</Label>
                     <Input type="number" step="any" placeholder="0" value={l.base || ""} onChange={(e) => {
                       const base = Number(e.target.value) || 0;
                       // Final price always follows the base (with % if one is set).
@@ -240,15 +243,16 @@ function StockAdmin() {
                 {/* Final price — always calculated from the base (± % if set) */}
                 <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Final price / unit</div>
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Final merchant cost / unit</div>
                     <div className="text-lg font-black text-primary">{money(finalOf(l))}</div>
                   </div>
                   <div className="text-[11px] text-muted-foreground mt-0.5">
                     {Number(l.base) > 0
                       ? (Number(l.pct) === 0
-                          ? `Base ${money(l.base)} · no % applied`
-                          : `Base ${money(l.base)} ${l.pct > 0 ? "+" : ""}${l.pct}% = ${money(finalOf(l))}`)
-                      : "Enter a base / list price above"}
+                          ? `Cost ${money(l.base)} · no % applied`
+                          : `Cost ${money(l.base)} ${l.pct > 0 ? "+" : ""}${l.pct}% = ${money(finalOf(l))}`)
+                      : "Enter the merchant cost above"}
+                    {" · "}what you pay the merchant, not the shop price
                   </div>
                 </div>
 
@@ -325,7 +329,7 @@ function StockAdmin() {
           <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-muted text-left text-xs uppercase text-muted-foreground">
-              <tr><th className="p-3">Date</th><th className="p-3">Ref</th><th className="p-3">Supplier</th><th className="p-3">Product</th><th className="p-3">Qty</th><th className="p-3">Unit cost</th><th className="p-3">Total</th></tr>
+              <tr><th className="p-3">Date</th><th className="p-3">Ref</th><th className="p-3">Supplier</th><th className="p-3">Product</th><th className="p-3">Qty</th><th className="p-3">Merchant cost</th><th className="p-3">Total</th></tr>
             </thead>
             <tbody>
               {rows.map((r) => (
