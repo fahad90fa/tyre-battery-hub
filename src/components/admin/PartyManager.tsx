@@ -514,7 +514,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
           lives inside the dialog. */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="font-semibold text-sm">Transaction history</div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Dialog open={addOpen} onOpenChange={(o) => { setAddOpen(o); if (o) setForm(blankEntry(kind)); }}>
             <DialogTrigger asChild>
               <Button size="sm"><Plus className="h-4 w-4 mr-1.5" /> Add entry</Button>

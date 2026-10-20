@@ -14,6 +14,11 @@ export type SearchableOption = {
   hint?: string;
   /** Kept out of the browse list; shown once the user types (e.g. sold-out products). */
   searchOnly?: boolean;
+  /**
+   * The bare name the "Add new" check compares a typed name with, when the
+   * label carries more (e.g. "CUST-1005 · Ali Khan" → "Ali Khan"). Defaults to the label.
+   */
+  matchText?: string;
 };
 
 const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
@@ -47,7 +52,7 @@ export function SearchableSelect({
   // Hidden (search-only) options still count here, so "Add new" is never
   // offered for a name that already exists — typing it shows the existing one.
   const canCreate = !!onCreate && trimmed.length > 0 &&
-    !options.some((o) => norm(o.label) === norm(trimmed));
+    !options.some((o) => norm(o.matchText ?? o.label) === norm(trimmed));
   const visible = trimmed ? options : options.filter((o) => !o.searchOnly || o.value === value);
   const hiddenCount = options.length - visible.length;
 
@@ -72,11 +77,11 @@ export function SearchableSelect({
           <CommandInput placeholder={searchPlaceholder} value={query} onValueChange={setQuery} />
           <CommandList className="max-h-60">
             <CommandEmpty>
-              {onCreate && trimmed ? (
+              {canCreate ? (
                 <button
                   type="button"
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent rounded-md text-left"
-                  onClick={() => { onCreate(trimmed); setQuery(""); setOpen(false); }}
+                  onClick={() => { onCreate!(trimmed); setQuery(""); setOpen(false); }}
                 >
                   <Plus className="h-4 w-4 text-primary" /> {createLabel} “{trimmed}”
                 </button>

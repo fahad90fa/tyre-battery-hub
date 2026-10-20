@@ -4,6 +4,7 @@ import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, localToday, localDateOf, shortDate } from "@/lib/format";
 import { isTracked, stockOf, oversold } from "@/lib/stock";
+import { normalizeProductName } from "@/lib/pricing";
 import { loadMonthPnL, monthLabel, type MonthPnL } from "@/lib/finance";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -138,7 +139,10 @@ function Reports() {
 
   // Out of stock, but only what still sells: tracked products at or below
   // zero that sold in the last RECENT_DAYS days. (Services and trade-ins are
-  // not stock-tracked, so they can't be out of stock.)
+  // not stock-tracked, so they can't be out of stock.) Duplicate-name copies
+  // of one product (until they are merged) count as one: a name that still
+  // has stock on any tracked copy is not out of stock, and the sold-out
+  // copies of one name make a single row with their sales added up.
   const recentSold = useMemo(() => {
     const map = new Map<string, { units: number; last: string }>();
     for (const inv of recentInvoices) {
@@ -152,12 +156,27 @@ function Reports() {
     }
     return map;
   }, [recentInvoices]);
-  const outStock = products.filter((p) => isTracked(p) && stockOf(p) <= 0);
-  const reorder = outStock
-    .filter((p) => recentSold.has(p.id))
-    .map((p) => ({ ...p, sold: recentSold.get(p.id)! }))
-    .sort((a, b) => b.sold.units - a.sold.units || b.sold.last.localeCompare(a.sold.last));
-  const otherOut = outStock.length - reorder.length;
+  const { reorder, otherOut } = useMemo(() => {
+    const nameKey = (p: any) => normalizeProductName(p.product_name) || `id:${p.id}`;
+    const stockedNames = new Set(products.filter((p) => isTracked(p) && stockOf(p) > 0).map(nameKey));
+    type OutRow = { key: string; product_name: string; oversoldUnits: number; sold: { units: number; last: string } | null };
+    const byName = new Map<string, OutRow>();
+    for (const p of products) {
+      if (!isTracked(p) || stockOf(p) > 0) continue;
+      const key = nameKey(p);
+      if (stockedNames.has(key)) continue;
+      const row = byName.get(key) ?? { key, product_name: p.product_name ?? "—", oversoldUnits: 0, sold: null };
+      row.oversoldUnits += oversold(p);
+      const s = recentSold.get(p.id);
+      if (s) row.sold = { units: (row.sold?.units ?? 0) + s.units, last: row.sold && row.sold.last > s.last ? row.sold.last : s.last };
+      byName.set(key, row);
+    }
+    const out = [...byName.values()];
+    const reorder = out
+      .flatMap((r) => (r.sold ? [{ ...r, sold: r.sold }] : []))
+      .sort((a, b) => b.sold.units - a.sold.units || b.sold.last.localeCompare(a.sold.last));
+    return { reorder, otherOut: out.length - reorder.length };
+  }, [products, recentSold]);
 
   const netLabel = pnl && pnl.netProfit < 0 ? "Net loss" : "Net profit";
 
@@ -239,14 +258,14 @@ function Reports() {
           <ul className="text-sm space-y-1 max-h-64 overflow-y-auto">
             {reorder.length === 0 ? <li className="text-muted-foreground">Nothing sold in the last {RECENT_DAYS} days is out of stock.</li> :
               reorder.map((p) => (
-                <li key={p.id} className="flex justify-between gap-3 border-b py-1">
+                <li key={p.key} className="flex justify-between gap-3 border-b py-1">
                   <span className="min-w-0">
                     <span className="block truncate">{p.product_name}</span>
                     <span className="block text-xs text-muted-foreground">
                       {p.sold.units} sold in {RECENT_DAYS} days · last {shortDate(`${p.sold.last}T00:00:00`)}
                     </span>
                   </span>
-                  <span className="text-destructive shrink-0">Out of stock{oversold(p) > 0 && ` · ${oversold(p)} oversold`}</span>
+                  <span className="text-destructive shrink-0">Out of stock{p.oversoldUnits > 0 && ` · ${p.oversoldUnits} oversold`}</span>
                 </li>
               ))}
           </ul>
@@ -280,7 +299,6 @@ function PnlCard({ month, pnl, error }: { month: string; pnl: MonthPnL | null; e
   const restTypes = pnl.expensesByType.slice(6);
   const restSum = restTypes.reduce((a, t) => a + t.amount, 0);
   const loss = pnl.netProfit < 0;
-  const netLossPart = Math.max(0, -pnl.netProfit);
 
   return (
     <Card title={title}>
@@ -302,7 +320,7 @@ function PnlCard({ month, pnl, error }: { month: string; pnl: MonthPnL | null; e
             <span>
               <span className="font-semibold">Total loss</span>
               <span className="block text-xs text-muted-foreground">
-                Below-cost sales {money(pnl.belowCostLoss)} · Stock written off {money(pnl.writeOffs)} · Net loss {money(netLossPart)}
+                Sales below cost {money(pnl.belowCostLoss)} · Stock written off {money(pnl.writeOffs)} · Other loss {money(pnl.otherLoss)}
               </span>
             </span>
             <b className={pnl.totalLoss > 0 ? "text-destructive" : ""}>{money(pnl.totalLoss)}</b>

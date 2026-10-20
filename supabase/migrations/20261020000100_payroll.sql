@@ -155,4 +155,9 @@ end $$;
 revoke execute on function public.salary_mark_unpaid(uuid, text) from public, anon;
 grant execute on function public.salary_mark_unpaid(uuid, text) to authenticated;
 
+-- 5. When an employee left. Set by the app when they are made inactive
+--    (cleared when reactivated), so the months they still worked keep
+--    showing as due instead of vanishing the moment they leave.
+alter table public.employees add column if not exists left_on date;
+
 notify pgrst, 'reload schema';

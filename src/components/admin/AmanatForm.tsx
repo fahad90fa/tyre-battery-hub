@@ -10,8 +10,9 @@
 // Amanat never touches the account ledgers: money held in trust is shown
 // beside the balance, not in it. An item taken "from shelf stock" is booked
 // in the stock ledger by the database (amanat_stock_sync trigger, migration
-// 20261020): it comes off stock when given and goes back when received or
-// deleted. Items a party left with us are not ours and never add to stock.
+// 20261020): it comes off stock when given and goes back when returned,
+// received or deleted, each change as its own dated stock movement. Items a
+// party left with us are not ours and never add to stock.
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { localToday, money } from "@/lib/format";
@@ -178,6 +179,27 @@ export async function deleteAmanat(id: string) {
 const contactOf = (p: AmanatParty | null | undefined) =>
   [p?.address, p?.cnic ? `CNIC ${p.cnic}` : null].filter(Boolean).join(" · ");
 const partyLabel = (p: AmanatParty) => `${p.account_no ? `${p.account_no} · ` : ""}${p.name ?? "—"}`;
+const normName = (s: string | null | undefined) => (s ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+
+/**
+ * The customer / merchant already carrying this name (case and spacing
+ * ignored): the loaded list first, then the database (an account added on
+ * another device). The database is asked for a loose ILIKE match — only
+ * letters/digits go into the pattern, so nothing needs LIKE-escaping — and
+ * the exact comparison happens here.
+ */
+async function findPartyByName(type: AmanatPartyType, name: string, list: AmanatParty[]) {
+  const want = normName(name);
+  if (!want) return { party: null, error: null };
+  const local = list.find((p) => normName(p.name) === want);
+  if (local) return { party: local, error: null };
+  const words = want.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (words.length === 0) return { party: null, error: null };
+  const { data, error } = await supabase.from(PARTY_TABLE[type]).select(PARTY_COLUMNS)
+    .ilike("name", `%${words.join("%")}%`).limit(200);
+  if (error) return { party: null, error: error.message };
+  return { party: ((data ?? []) as AmanatParty[]).find((p) => normName(p.name) === want) ?? null, error: null };
+}
 
 // ---------------------------------------------------------------- form
 
@@ -299,6 +321,19 @@ export function AmanatForm({
   };
 
   const createParty = async (name: string) => {
+    // A name that already has an account picks that account instead of
+    // opening a duplicate one.
+    const found = await findPartyByName(partyType, name, partyList);
+    if (found.error) return toast.error(found.error);
+    if (found.party) {
+      const p = found.party;
+      if (!partyList.some((x) => x.id === p.id)) {
+        setCreatedParties((prev) => ({ ...prev, [partyType]: [...prev[partyType], p] }));
+      }
+      setForm((f) => ({ ...f, party_id: p.id, customer_name: p.name ?? f.customer_name, phone: p.phone ?? "", contact: contactOf(p) }));
+      toast.info(`${p.name} already has ${word} account ${p.account_no ?? ""} — selected it`);
+      return;
+    }
     const { data, error } = await supabase.from(PARTY_TABLE[partyType])
       .insert({ name: name.trim(), phone: form.phone.trim() || null })
       .select(PARTY_COLUMNS).maybeSingle();
@@ -407,7 +442,7 @@ export function AmanatForm({
         <div className="space-y-1.5">
           <Label>{PARTY_WORD[partyType]} account {!editing && <span className="text-destructive">*</span>}</Label>
           <SearchableSelect
-            options={partyList.map((p) => ({ value: p.id, label: partyLabel(p), hint: p.phone ?? undefined }))}
+            options={partyList.map((p) => ({ value: p.id, label: partyLabel(p), matchText: p.name ?? undefined, hint: p.phone ?? undefined }))}
             value={form.party_id}
             onValueChange={pickParty}
             placeholder={`Select ${word}`}

@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { money, localToday, localDateOf } from "@/lib/format";
 import { methodLabel } from "@/lib/payments";
 import { normalizeProductName } from "@/lib/pricing";
-import { isTracked, stockOf } from "@/lib/stock";
+import { isTracked, oversold, stockOf } from "@/lib/stock";
 import { loadMonthPnL, monthLabel, type MonthPnL } from "@/lib/finance";
 import { useLiveReload, type LiveStatus } from "@/lib/useLiveReload";
 import { fetchAll } from "@/lib/fetchAll";
@@ -80,6 +80,8 @@ const units = (n: number) => Math.round(n).toLocaleString();
 /** Money with a real minus sign — a loss never reads as a profit. */
 const signedMoney = (n: number) => (n < 0 ? MINUS + money(-n) : money(n));
 const signedUnits = (n: number) => (n > 0 ? `+${units(n)}` : n < 0 ? `${MINUS}${units(-n)}` : "0");
+/** A ledger count that can sit below zero: real minus sign, no plus. */
+const netUnits = (n: number) => (n < 0 ? `${MINUS}${units(-n)}` : units(n));
 const signedTick = (n: number) => (n > 0 ? `+${compact(n)}` : n < 0 ? `${MINUS}${compact(-n)}` : "0");
 const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 /** Round axis bounds and whole-unit ticks around a line that need not start at zero. */
@@ -126,10 +128,13 @@ type Inv = { id: string; total_amount: number | null; payment_status: string | n
 type Expense = { id: string; amount: number | null; expense_type: string | null; date_of_expense: string };
 type Purchase = { id: string; product_id: string | null; quantity: number | null; date: string };
 type Adjustment = { id: string; product_id: string | null; delta: number | null; reason: string | null; note: string | null; created_at: string };
+/** A return row processReturn writes: negative quantity, dated on the sale day, created when the goods came back. */
+type ReturnRow = { id: string; product_id: string | null; quantity_purchased: number | null; purchase_date: string; created_at: string };
 
 type DayFlow = { day: string; label: string; received: number; sales: number; expenses: number };
 type MonthSales = { key: string; label: string; full: string; sales: number; expenses: number };
-type DayMove = { day: string; label: string; in: number; outQty: number; out: number; adj: number; onHand: number };
+/** `in` = bought + returned (`returned` is the part of it that came back from customers). */
+type DayMove = { day: string; label: string; in: number; returned: number; outQty: number; out: number; adj: number; onHand: number };
 
 type Dash = {
   counts: { templates: number; products: number; stockUnits: number; employees: number; merchants: number; clients: number };
@@ -139,7 +144,10 @@ type Dash = {
   monthly: MonthSales[];
   movement: DayMove[];
   backfillUnits: number;
+  /** Ledger count of tracked products: on-shelf units minus oversold units. */
   onHandNow: number;
+  /** Units sold before their purchase was booked (counters below zero). */
+  oversoldUnits: number;
   stockByCat: { name: string; stock: number }[];
   topSold: { name: string; value: number }[];
   outOfStockRecent: number;
@@ -149,7 +157,7 @@ const EMPTY: Dash = {
   counts: { templates: 0, products: 0, stockUnits: 0, employees: 0, merchants: 0, clients: 0 },
   stockValue: 0,
   today: { received: 0, sales: 0, expenses: 0, byMethod: [] },
-  daily: [], monthly: [], movement: [], backfillUnits: 0, onHandNow: 0,
+  daily: [], monthly: [], movement: [], backfillUnits: 0, onHandNow: 0, oversoldUnits: 0,
   stockByCat: [], topSold: [], outOfStockRecent: 0,
 };
 
@@ -172,7 +180,7 @@ async function loadDashboard(quiet: boolean): Promise<{ data: Dash; ok: boolean 
   const start30 = dateOfDay(days30[0]);
   const opt = { quiet };
 
-  const [prodR, invR, expR, catR, payR, ledR, spR, adjR, tplR, empR, merR, cliR] = await Promise.all([
+  const [prodR, invR, expR, catR, payR, ledR, spR, adjR, retR, tplR, empR, merR, cliR] = await Promise.all([
     fetchAll((a, b) => supabase.from("products")
       .select("id, product_name, quantity_in_stock, track_stock, purchase_price, category_id")
       .order("id").range(a, b), 1000, opt),
@@ -203,18 +211,28 @@ async function loadDashboard(quiet: boolean): Promise<{ data: Dash; ok: boolean 
       .select("id, product_id, delta, reason, note, created_at")
       .gte("created_at", start30.toISOString())
       .order("id").range(a, b), 1000, opt),
+    // Invoice returns: processReturn shrinks or deletes the sale lines in
+    // place (the trigger restocks on the return day) and writes one of
+    // these per line. The sale day is never after the return day, so every
+    // return that touches the 30-day window happened inside it.
+    fetchAll((a, b) => supabase.from("customer_purchases")
+      .select("id, product_id, quantity_purchased, purchase_date, created_at")
+      .eq("payment_method", "return")
+      .gte("created_at", start30.toISOString())
+      .order("id").range(a, b), 1000, opt),
     supabase.from("templates").select("*", { count: "exact", head: true }),
     supabase.from("employees").select("*", { count: "exact", head: true }),
     supabase.from("merchants").select("*", { count: "exact", head: true }),
     supabase.from("clients").select("*", { count: "exact", head: true }),
   ]);
-  const ok = [prodR, invR, expR, catR, payR, ledR, spR, adjR, tplR, empR, merR, cliR].every((r) => !r.error);
+  const ok = [prodR, invR, expR, catR, payR, ledR, spR, adjR, retR, tplR, empR, merR, cliR].every((r) => !r.error);
 
   const products = (prodR.data ?? []) as unknown as Prod[];
   const invoices = (invR.data ?? []) as unknown as Inv[];
   const expenses = (expR.data ?? []) as unknown as Expense[];
   const purchases = (spR.data ?? []) as unknown as Purchase[];
   const adjustments = (adjR.data ?? []) as unknown as Adjustment[];
+  const returns = (retR.data ?? []) as unknown as ReturnRow[];
   const cats = (catR.data ?? []) as { id: string; name: string }[];
 
   const trackedIds = new Set(products.filter(isTracked).map((p) => p.id));
@@ -297,10 +315,22 @@ async function loadDashboard(quiet: boolean): Promise<{ data: Dash; ok: boolean 
   const lastDay = days30[days30.length - 1];
   const clampDay = (d: string) => (d > lastDay ? lastDay : d); // a purchase dated ahead counts today
   const inByDay = new Map<string, number>();
+  const retByDay = new Map<string, number>();
   const adjByDay = new Map<string, number>();
   let backfillUnits = 0;
   for (const sp of purchases) {
     if (sp.product_id && trackedIds.has(sp.product_id)) add(inByDay, clampDay(sp.date), Number(sp.quantity) || 0);
+  }
+  // A return shrank the sale line in place, so the invoices above count the
+  // reduced line on the sale day, while the stock came back on the return
+  // day. Put the returned units back into that sale day's "out" and count
+  // them as "in" on the day they came back — as the ledger moved them.
+  for (const r of returns) {
+    if (!r.product_id || !trackedIds.has(r.product_id)) continue;
+    const qty = -(Number(r.quantity_purchased) || 0); // stored negative
+    if (qty <= 0) continue;
+    if (r.purchase_date) add(outByDay, r.purchase_date, qty);
+    add(retByDay, clampDay(localDateOf(r.created_at)), qty);
   }
   for (const a of adjustments) {
     if (!a.product_id || !trackedIds.has(a.product_id)) continue;
@@ -308,12 +338,18 @@ async function loadDashboard(quiet: boolean): Promise<{ data: Dash; ok: boolean 
     if (isBackfill(a)) { backfillUnits += delta; continue; }
     add(adjByDay, clampDay(localDateOf(a.created_at)), delta);
   }
-  // Units on hand now: the counter the ledger keeps, below zero included,
-  // so the line ends exactly on today's stock.
+  // Net stock now: the counter the ledger keeps, below zero included, so
+  // the line ends exactly on the ledger's count (on-shelf units minus
+  // oversold ones).
   const onHandNow = products.filter(isTracked).reduce((s, p) => s + stockOf(p), 0);
+  const oversoldUnits = products.reduce((s, p) => s + oversold(p), 0);
   const movement: DayMove[] = days30.map((day) => {
     const outQty = outByDay.get(day) ?? 0;
-    return { day, label: dayLabel(day), in: inByDay.get(day) ?? 0, outQty, out: -outQty, adj: adjByDay.get(day) ?? 0, onHand: 0 };
+    const returned = retByDay.get(day) ?? 0;
+    return {
+      day, label: dayLabel(day), in: (inByDay.get(day) ?? 0) + returned, returned,
+      outQty, out: -outQty, adj: adjByDay.get(day) ?? 0, onHand: 0,
+    };
   });
   // Walk back from today: the stock at the end of a day is the next day's
   // stock minus what that next day moved — so every step of the line is
@@ -340,7 +376,16 @@ async function loadDashboard(quiet: boolean): Promise<{ data: Dash; ok: boolean 
 
   // Reorder alert: only what customers actually bought lately. Hundreds of
   // dead or one-off products sit at zero and would drown the real gaps.
-  const outOfStockRecent = products.filter((x) => isTracked(x) && stockOf(x) <= 0 && soldRecently.has(x.id)).length;
+  // Counted by product NAME: a sold-out duplicate row is no gap while
+  // another row of the same name still has stock, and two sold-out
+  // duplicates are one product to reorder, not two.
+  const nameKey = (x: Prod) => normalizeProductName(x.product_name) || `#${x.id}`;
+  const namesInStock = new Set(products.filter((x) => isTracked(x) && stockOf(x) > 0).map(nameKey));
+  const outOfStockRecent = new Set(
+    products
+      .filter((x) => isTracked(x) && stockOf(x) <= 0 && soldRecently.has(x.id) && !namesInStock.has(nameKey(x)))
+      .map(nameKey),
+  ).size;
 
   return {
     ok,
@@ -356,7 +401,7 @@ async function loadDashboard(quiet: boolean): Promise<{ data: Dash; ok: boolean 
         expenses: r2(expByDay.get(today) ?? 0),
         byMethod: [...byMethod].map(([m, v]) => ({ name: methodLabel(m), value: r2(v) })),
       },
-      daily, monthly, movement, backfillUnits, onHandNow, stockByCat,
+      daily, monthly, movement, backfillUnits, onHandNow, oversoldUnits, stockByCat,
       topSold: [...sold.values()].sort((a, b) => b.value - a.value).slice(0, 5),
       outOfStockRecent,
     },
@@ -381,7 +426,9 @@ function Dashboard() {
   const hasData = useRef(false);
   const busy = useRef(false);
   const pending = useRef<RefreshOpts | null>(null);
-  const finSeq = useRef(0);
+  const finSeq = useRef(0);       // last P&L load started
+  const finShownSeq = useRef(0);  // the load whose figures are on screen
+  const finLoudSeq = useRef(0);   // last owner-initiated (non-quiet) load
   const monthRef = useRef(month);
   // Follow the calendar (roll to the new month at midnight) until the owner
   // picks another month.
@@ -401,17 +448,25 @@ function Dashboard() {
 
   const loadFinance = useCallback(async (m: string, quiet: boolean) => {
     const seq = ++finSeq.current;
-    if (!quiet) setFinBusy(true);
+    if (!quiet) { finLoudSeq.current = seq; setFinBusy(true); }
     try {
       const [cur, prev] = await Promise.all([loadMonthPnL(m, { quiet }), loadMonthPnL(shiftMonth(m, -1), { quiet })]);
       // A failed background refresh keeps the figures already on screen
       // rather than replacing them with incomplete ones.
       if (quiet && (cur.error || prev.error)) return;
-      if (mounted.current && seq === finSeq.current) setFin({ month: m, cur, prev });
+      // Show figures only for the month now picked, and never over figures
+      // from a load that started later. A later load that failed quietly
+      // (or is still running) does not throw this one away — so the month
+      // the owner just picked still arrives when a live refresh fails.
+      if (!mounted.current || m !== monthRef.current || seq < finShownSeq.current) return;
+      finShownSeq.current = seq;
+      setFin({ month: m, cur, prev });
     } catch {
       // keep the figures already on screen
     } finally {
-      if (mounted.current && seq === finSeq.current) setFinBusy(false);
+      // Busy until the owner's latest load lands — a background load
+      // finishing first does not clear it.
+      if (mounted.current && seq === finLoudSeq.current) setFinBusy(false);
     }
   }, []);
 
@@ -444,8 +499,11 @@ function Dashboard() {
         if (followCurrent.current && monthRef.current !== cm) {
           monthRef.current = cm;
           setMonth(cm); // the month effect loads the panel
-        } else if (ok && (!o.quiet || monthRef.current === cm)) {
-          // Live updates refresh the current month only; past months are closed.
+        } else if (ok) {
+          // Live updates reload whichever month is picked: past months
+          // change too (backdated sales, returns shrinking old bills,
+          // expenses entered with any date). A failed quiet load keeps the
+          // figures on screen.
           await loadFinance(monthRef.current, o.quiet);
         }
       }
@@ -464,6 +522,9 @@ function Dashboard() {
 
   const pickMonth = (m: string) => {
     followCurrent.current = m === currentMonth();
+    // At once, not after the render: a load for the old month landing in
+    // between must not be taken for this one.
+    monthRef.current = m;
     setMonth(m);
   };
 
@@ -486,7 +547,10 @@ function Dashboard() {
   ];
 
   const mv = dash.movement;
-  const mvTotals = mv.reduce((t, d) => ({ in: t.in + d.in, out: t.out + d.outQty, adj: t.adj + d.adj }), { in: 0, out: 0, adj: 0 });
+  const mvTotals = mv.reduce(
+    (t, d) => ({ in: t.in + d.in, returned: t.returned + d.returned, out: t.out + d.outQty, adj: t.adj + d.adj }),
+    { in: 0, returned: 0, out: 0, adj: 0 },
+  );
   const onHandValues = mv.map((d) => d.onHand);
   const onHandAxis = niceScale(
     onHandValues.length ? Math.min(...onHandValues) : 0,
@@ -546,7 +610,7 @@ function Dashboard() {
         {dash.outOfStockRecent > 0 && (
           <div className="mt-4 rounded-xl bg-destructive/10 text-destructive px-4 py-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
             <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
-            <span title="Stock-tracked products at or below zero that sold in the last 60 days">
+            <span title="Stock-tracked products at or below zero that sold in the last 60 days, counted by name — a name with stock on another product row is left out">
               {dash.outOfStockRecent} product{dash.outOfStockRecent > 1 ? "s" : ""} that sold recently{" "}
               {dash.outOfStockRecent > 1 ? "are" : "is"} out of stock — reorder
             </span>
@@ -645,17 +709,23 @@ function Dashboard() {
             title="Stock movement — last 30 days"
             subtitle="Units of stock-tracked products per day"
             legend={<LegendRow items={[
-              { label: "In (bought)", color: S1, value: signedUnits(mvTotals.in) },
+              { label: "In (bought or returned)", color: S1, value: signedUnits(mvTotals.in) },
               { label: "Out (sold or removed)", color: S2, value: signedUnits(-mvTotals.out) },
               { label: "Adjustments", color: S3, value: signedUnits(mvTotals.adj) },
             ]} />}
-            note={dash.backfillUnits !== 0
-              ? `The one-time opening-stock entries made when the stock ledger started (${signedUnits(dash.backfillUnits)} units) record stock already on the shelf, so they are not drawn as movement.`
-              : undefined}
+            note={[
+              mvTotals.returned > 0
+                ? `${units(mvTotals.returned)} unit${mvTotals.returned === 1 ? "" : "s"} of "in" came back on invoice returns — counted on the day they came back, and still as sold on the day of the sale.`
+                : "",
+              dash.backfillUnits !== 0
+                ? `The one-time opening-stock entries made when the stock ledger started (${signedUnits(dash.backfillUnits)} units) record stock already on the shelf, so they are not drawn as movement.`
+                : "",
+            ].filter(Boolean).join(" ") || undefined}
             table={{
-              head: ["Day", "In", "Out", "Adjusted", "Net"],
+              head: ["Day", "In", "Of which returned", "Out", "Adjusted", "Net"],
               rows: recentFirst(mv).map((d) => [
-                fullDay(d.day), signedUnits(d.in), signedUnits(-d.outQty), signedUnits(d.adj), signedUnits(d.in - d.outQty + d.adj),
+                fullDay(d.day), signedUnits(d.in), d.returned ? units(d.returned) : "—", signedUnits(-d.outQty), signedUnits(d.adj),
+                signedUnits(d.in - d.outQty + d.adj),
               ]),
             }}
           >
@@ -668,6 +738,7 @@ function Dashboard() {
                   cursor={BAR_CURSOR}
                   content={<ChartTip title={(d: DayMove) => fullDay(d.day)} rows={(d: DayMove) => [
                     { name: "in", value: signedUnits(d.in), color: S1 },
+                    ...(d.returned ? [{ name: "of which returned", value: units(d.returned) }] : []),
                     { name: "out", value: signedUnits(-d.outQty), color: S2 },
                     { name: "adjusted", value: signedUnits(d.adj), color: S3 },
                     { name: "net", value: signedUnits(d.in - d.outQty + d.adj) },
@@ -682,12 +753,15 @@ function Dashboard() {
           </Chart>
 
           <Chart
-            title="Units on hand — last 30 days"
-            subtitle="Stock-tracked products at the end of each day"
-            aside={<Aside label="Now" value={units(dash.onHandNow)} />}
+            title="Net stock — last 30 days"
+            subtitle="Ledger count of stock-tracked products (oversold units subtracted)"
+            aside={<Aside label="Net now" value={netUnits(dash.onHandNow)} />}
+            note={dash.oversoldUnits > 0
+              ? `${units(dash.counts.stockUnits)} on shelf · ${units(dash.oversoldUnits)} oversold`
+              : undefined}
             table={{
-              head: ["Day", "Units on hand"],
-              rows: recentFirst(mv).map((d) => [fullDay(d.day), units(d.onHand)]),
+              head: ["Day", "Net stock"],
+              rows: recentFirst(mv).map((d) => [fullDay(d.day), netUnits(d.onHand)]),
             }}
           >
             <ResponsiveContainer width="100%" height={220}>
@@ -699,10 +773,10 @@ function Dashboard() {
                 <Tooltip
                   cursor={LINE_CURSOR}
                   content={<ChartTip title={(d: DayMove) => fullDay(d.day)} rows={(d: DayMove) => [
-                    { name: "units on hand", value: units(d.onHand), color: S1 },
+                    { name: "net stock", value: netUnits(d.onHand), color: S1 },
                   ]} />}
                 />
-                <Line type="linear" dataKey="onHand" name="Units on hand" stroke={S1} strokeWidth={2}
+                <Line type="linear" dataKey="onHand" name="Net stock" stroke={S1} strokeWidth={2}
                       strokeLinecap="round" strokeLinejoin="round" dot={endDot(mv.length - 1)}
                       activeDot={{ r: 5, fill: S1, stroke: "var(--card)", strokeWidth: 2 }} isAnimationActive={animate} />
               </LineChart>
@@ -800,10 +874,12 @@ function FinancePanel({ month, onMonth, fin, busy }: {
   const options = Array.from({ length: 12 }, (_, i) => shiftMonth(nowMonth, -i));
   if (!options.includes(month)) options.push(month);
   const isCurrent = month === nowMonth;
-  const cur = fin?.cur;
-  const prev = fin?.prev;
+  // Another month's figures never show under this month's name: until the
+  // picked month has loaded, the tiles show "—".
+  const shown = fin && fin.month === month ? fin : null;
+  const cur = shown?.cur;
+  const prev = shown?.prev;
   const net = cur?.netProfit ?? 0;
-  const netLoss = Math.max(0, -net);
   const largest = cur?.expensesByType[0];
 
   const tiles: { label: string; value: number | null; format: (n: number) => string; tone?: string; sub?: ReactNode }[] = [
@@ -833,7 +909,7 @@ function FinancePanel({ month, onMonth, fin, busy }: {
         <span className="block space-y-0.5">
           <span className="block">Sales below cost {money(cur.belowCostLoss)}</span>
           <span className="block">Stock written off {money(cur.writeOffs)}</span>
-          <span className="block">Net loss {money(netLoss)}</span>
+          <span className="block">Other loss {money(cur.otherLoss)}</span>
         </span>
       ) : null,
     },
@@ -885,7 +961,7 @@ function FinancePanel({ month, onMonth, fin, busy }: {
         ))}
       </div>
 
-      {cur && prev && fin?.month === month && (
+      {cur && prev && (
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
           <span className="text-muted-foreground">
             vs {monthLabel(prev.month)}{isCurrent ? " (month so far vs the whole month)" : ""}:

@@ -822,13 +822,17 @@ notify pgrst, 'reload schema';
 -- Amanat never touches client_ledger / merchant_ledger: money held in trust
 -- is not part of the account balance (the app shows it beside the balance).
 --
--- An item taken from shelf stock (from_stock) is booked as one
--- stock_adjustments row per amanat ('Amanat' reason, linked by amanat_id) and
--- the stock ledger triggers move products.quantity_in_stock from it: giving
--- the item out takes the units off, a partial return or "received" gives
--- them back, deleting the amanat deletes its row (cascade) and gives them
--- back. Items a party LEFT with us are not ours and never add to stock.
--- Existing rows keep from_stock = false, so nothing changes retroactively.
+-- An item taken from shelf stock (from_stock) is booked in stock_adjustments
+-- ('Amanat' reason, linked by amanat_id) and the stock ledger triggers move
+-- products.quantity_in_stock from it. The rows are append-only, so every
+-- movement keeps its own date on the dashboard and the Inventory page:
+-- giving the item out adds a minus row, a partial return or "received" adds
+-- a plus row for the units back, reopening adds a minus row again, and a
+-- product change books the units back on the old product and out on the new
+-- one. Deleting the amanat deletes all its rows (cascade, net zero) and so
+-- gives the units back. Items a party LEFT with us are not ours and never add
+-- to stock. Existing rows keep from_stock = false, so nothing changes
+-- retroactively.
 --
 -- Needs 20261015000000_stock_ledger.sql. Safe to re-run (no drops).
 
@@ -897,16 +901,22 @@ create index if not exists amanat_items_merchant_idx on public.amanat_items (mer
 
 -- 4. Shelf stock for items taken out of stock.
 alter table public.stock_adjustments add column if not exists amanat_id uuid references public.amanat_items(id) on delete cascade;
-create unique index if not exists stock_adjustments_amanat_id_uidx
+create index if not exists stock_adjustments_amanat_id_idx
   on public.stock_adjustments (amanat_id) where amanat_id is not null;
 
--- Keeps the amanat's one adjustment row equal to the units still out:
--- -(quantity - returned), 0 (no row) once received or when not from stock.
+-- Keeps the sum of the amanat's adjustment rows equal to the units still
+-- out: -(quantity - returned), 0 once received or when not from stock. Rows
+-- are never changed or removed here; each change appends the difference to
+-- what is already booked, dated now.
 create or replace function public.amanat_stock_sync()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare
   want integer := 0;
+  booked integer;
+  diff integer;
   tracked boolean;
+  label text := coalesce(new.amanat_no, 'Amanat') || ' — ' || new.customer_name;
+  r record;
 begin
   if new.from_stock and new.kind = 'item' and new.direction = 'taken' and new.product_id is not null then
     select p.track_stock into tracked from public.products p where p.id = new.product_id;
@@ -916,15 +926,34 @@ begin
     end if;
   end if;
 
-  if want = 0 then
-    delete from public.stock_adjustments where amanat_id = new.id;
-  else
+  -- Units still booked against another product (the product was changed or
+  -- cleared) go back to that product. A product being deleted is skipped:
+  -- its rows go with it.
+  for r in
+    select a.product_id, sum(a.delta)::integer as booked
+      from public.stock_adjustments a
+      join public.products p on p.id = a.product_id
+     where a.amanat_id = new.id and a.product_id is distinct from new.product_id
+     group by a.product_id
+    having sum(a.delta) <> 0
+  loop
     insert into public.stock_adjustments (product_id, delta, reason, note, amanat_id)
-    values (new.product_id, want, 'Amanat', coalesce(new.amanat_no, 'Amanat') || ' — ' || new.customer_name, new.id)
-    on conflict (amanat_id) where amanat_id is not null do update
-      set product_id = excluded.product_id, delta = excluded.delta, reason = excluded.reason, note = excluded.note
-      where (stock_adjustments.product_id, stock_adjustments.delta, stock_adjustments.reason, stock_adjustments.note)
-            is distinct from (excluded.product_id, excluded.delta, excluded.reason, excluded.note);
+    values (r.product_id, -r.booked, 'Amanat',
+            label || case when -r.booked > 0 then ' (returned)' else ' (given out)' end, new.id);
+  end loop;
+
+  -- The current product: book the difference between what should be out and
+  -- what is booked (from_stock turned off or "received" gives it all back).
+  if new.product_id is not null then
+    select coalesce(sum(a.delta), 0)::integer into booked
+      from public.stock_adjustments a
+     where a.amanat_id = new.id and a.product_id = new.product_id;
+    diff := want - booked;
+    if diff <> 0 then
+      insert into public.stock_adjustments (product_id, delta, reason, note, amanat_id)
+      values (new.product_id, diff, 'Amanat',
+              label || case when diff > 0 then ' (returned)' else ' (given out)' end, new.id);
+    end if;
   end if;
   return null;
 end $$;
@@ -1091,6 +1120,11 @@ begin
 end $$;
 revoke execute on function public.salary_mark_unpaid(uuid, text) from public, anon;
 grant execute on function public.salary_mark_unpaid(uuid, text) to authenticated;
+
+-- 5. When an employee left. Set by the app when they are made inactive
+--    (cleared when reactivated), so the months they still worked keep
+--    showing as due instead of vanishing the moment they leave.
+alter table public.employees add column if not exists left_on date;
 
 notify pgrst, 'reload schema';
 

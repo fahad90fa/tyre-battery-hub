@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAll } from "@/lib/fetchAll";
+import { toast } from "sonner";
 
 // Monthly profit & loss, shared by the dashboard card and the Reports page
 // so both always show the same figures.
@@ -30,10 +31,21 @@ export type MonthPnL = {
   writeOffs: number;
   /** Gross profit − expenses − write-offs. Negative = net loss. */
   netProfit: number;
-  /** Lines sold below their cost (already inside gross profit). */
+  /** Lines sold below their cost (already inside gross profit, so already in net profit). */
   belowCostLoss: number;
-  /** Below-cost sales + write-offs + net loss (if any). */
+  /**
+   * Money lost in the month: below-cost sales + write-offs, or the whole net
+   * loss when that is bigger. Never negative. Equals
+   * belowCostLoss + writeOffs + otherLoss. Both of the first two are already
+   * inside net profit, so a net loss is never added on top of them.
+   */
   totalLoss: number;
+  /**
+   * The part of a net loss not explained by below-cost sales and write-offs
+   * (e.g. expenses the month's profitable sales did not cover). 0 without a
+   * net loss, or when those two account for all of it.
+   */
+  otherLoss: number;
   /** Revenue on lines with no recorded cost (shows as 100% margin). */
   uncostedRevenue: number;
   /** Rs 1 stock-out bills: units and their cost, not counted as sales. */
@@ -124,6 +136,10 @@ export async function loadMonthPnL(month: string, opts: { quiet?: boolean } = {}
     .map((t) => ({ type: t.label, amount: r2(t.amount) }));
 
   // A missing table (database not yet updated) simply means no write-offs.
+  // Any other failure is reported: the write-offs are then unknown, not Rs 0.
+  const adjMissing = adj.error?.code === "42P01" || adj.error?.code === "PGRST205";
+  const adjErr = adj.error && !adjMissing ? adj.error : null;
+  if (adjErr && !opts.quiet) toast.error(`Could not load all records (${adjErr.message}) — figures may be incomplete`);
   let writeOffs = 0;
   if (!adj.error) {
     for (const a of (adj.data ?? []) as any[]) {
@@ -133,6 +149,11 @@ export async function loadMonthPnL(month: string, opts: { quiet?: boolean } = {}
 
   const grossProfit = revenue - cogs;
   const netProfit = grossProfit - expenseTotal - writeOffs;
+  // Below-cost sales and write-offs are already inside net profit: a net loss
+  // bigger than both adds only its unexplained remainder (otherLoss). Parts
+  // are rounded first so they always add up to the total shown.
+  const belowCostR = r2(belowCost), writeOffsR = r2(writeOffs), netProfitR = r2(netProfit);
+  const otherLoss = r2(Math.max(0, -netProfitR - belowCostR - writeOffsR));
   return {
     month,
     revenue: r2(revenue),
@@ -142,14 +163,16 @@ export async function loadMonthPnL(month: string, opts: { quiet?: boolean } = {}
     expenses: r2(expenseTotal),
     expensesByType,
     refundsExcluded: r2(refunds),
-    writeOffs: r2(writeOffs),
-    netProfit: r2(netProfit),
-    belowCostLoss: r2(belowCost),
-    totalLoss: r2(belowCost + writeOffs + Math.max(0, -netProfit)),
+    writeOffs: writeOffsR,
+    netProfit: netProfitR,
+    belowCostLoss: belowCostR,
+    // = max(belowCost + writeOffs, −netProfit), never negative
+    totalLoss: r2(belowCostR + writeOffsR + otherLoss),
+    otherLoss,
     uncostedRevenue: r2(uncosted),
     stockOutUnits,
     stockOutCost: r2(stockOutCost),
     invoiceCount,
-    error: invErr?.message ?? expErr?.message ?? null,
+    error: invErr?.message ?? expErr?.message ?? adjErr?.message ?? null,
   };
 }

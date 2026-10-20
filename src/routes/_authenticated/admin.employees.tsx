@@ -19,7 +19,7 @@ export const Route = createFileRoute("/_authenticated/admin/employees")({
   component: EmployeesAdmin,
 });
 
-const empty = { name: "", phone: "", email: "", cnic: "", position: "", salary: 0, joining_date: "", status: "active", notes: "" };
+const empty = { name: "", phone: "", email: "", cnic: "", position: "", salary: 0, joining_date: "", status: "active", left_on: "", notes: "" };
 
 type Payment = Tables<"salary_payments">;
 type PayStatus = "paid" | "partial" | "unpaid";
@@ -38,14 +38,21 @@ const firstName = (name: string | null | undefined) => String(name ?? "").trim()
 // Salaries are not paid in scrap.
 const SALARY_METHODS = PAYMENT_METHODS.filter((m) => m.value !== "scrap");
 
-/** One employee's salary for one month: due is the salary recorded with that
- *  month's payments (a later raise does not rewrite an old month), else the
- *  current salary. Due = active and joined by the month's end, or paid. */
+/** One employee's salary for one month. Due is the salary recorded on the
+ *  month's most recent payment (a later raise or cut does not rewrite an old
+ *  month, and the latest payment carries the salary the month settled on),
+ *  else the current salary. The month counts (eligible) when it has payments,
+ *  or when there is a salary to pay, they had joined by the month's end and
+ *  had not left before it began (active, or left_on on/after its 1st). A
+ *  month with nothing due and nothing paid is not due. */
 function monthState(e: any, m: string, rows: Payment[]): MonthState {
   const paid = round2(rows.reduce((s, p) => s + Number(p.amount), 0));
-  const recorded = rows.reduce((mx, p) => Math.max(mx, Number(p.salary_due) || 0), 0);
-  const due = round2(rows.length > 0 && recorded > 0 ? recorded : Number(e.salary) || 0);
-  const eligible = rows.length > 0 || (e.status === "active" && (!e.joining_date || e.joining_date <= monthEnd(m)));
+  const latest = rows.reduce<Payment | null>((a, p) => (!a || p.created_at >= a.created_at ? p : a), null);
+  const recorded = Number(latest?.salary_due) || 0;
+  const due = round2(recorded > 0 ? recorded : Number(e.salary) || 0);
+  const joined = !e.joining_date || e.joining_date <= monthEnd(m);
+  const stillThere = e.status === "active" || (!!e.left_on && e.left_on >= `${m}-01`);
+  const eligible = rows.length > 0 || (due > 0 && joined && stillThere);
   return { due, paid, remaining: Math.max(round2(due - paid), 0), status: paymentStatus(due, paid), eligible, rows };
 }
 
@@ -71,9 +78,14 @@ function EmployeesAdmin() {
   const thisMonth = localToday().slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
   const [pays, setPays] = useState<Payment[]>([]);
+  // The month `pays` was loaded for. Until it matches `month`, `pays` still
+  // holds the previous window: no statuses are shown and nothing can be paid
+  // (it would read a paid month as Unpaid and pre-fill a second salary).
+  const [paysMonth, setPaysMonth] = useState<string | null>(null);
   const [payErr, setPayErr] = useState<string | null>(null);
   const [pay, setPay] = useState<{ emp: any; month: string; mode: "pay" | "unpay" } | null>(null);
   const [payForm, setPayForm] = useState(emptyPay);
+  const [amountEdited, setAmountEdited] = useState(false);
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [busy, setBusy] = useState(false);
   const payReq = useRef(0);
@@ -85,12 +97,13 @@ function EmployeesAdmin() {
     setRows(data ?? []);
   };
   // The selected month and the five before it (for the history dots).
-  const loadPay = async () => {
+  const loadPay = async (m: string = month) => {
     const req = ++payReq.current;
     const { data, error } = await supabase.from("salary_payments").select("*")
-      .gte("month", addMonths(month, -5)).lte("month", month)
+      .gte("month", addMonths(m, -5)).lte("month", m)
       .order("paid_date").order("created_at").order("id");
     if (req !== payReq.current) return; // a newer month was picked meanwhile
+    setPaysMonth(m);
     if (error) { setPayErr(error.message); setPays([]); return; }
     setPayErr(null); setPays(data ?? []);
   };
@@ -99,7 +112,11 @@ function EmployeesAdmin() {
 
   const save = async () => {
     if (!form.name?.trim()) return toast.error("Name required");
-    const payload = { ...form, salary: Number(form.salary || 0), joining_date: form.joining_date || null };
+    const payload = {
+      ...form, salary: Number(form.salary || 0), joining_date: form.joining_date || null,
+      // Only an inactive employee has a leaving date (cleared on reactivation).
+      left_on: form.status === "active" ? null : form.left_on || null,
+    };
     const { error } = editing
       ? await supabase.from("employees").update(payload).eq("id", editing)
       : await supabase.from("employees").insert(payload);
@@ -117,10 +134,16 @@ function EmployeesAdmin() {
     toast.success(`${r.name} deleted`);
     load(); loadPay();
   };
-  const edit = (r: any) => { setEditing(r.id); setForm({ ...empty, ...r, joining_date: r.joining_date ?? "" }); setOpen(true); };
+  const edit = (r: any) => { setEditing(r.id); setForm({ ...empty, ...r, joining_date: r.joining_date ?? "", left_on: r.left_on ?? "" }); setOpen(true); };
+  // Making someone inactive records the day they left, so the months they
+  // still worked stay due in payroll; reactivating clears it.
   const toggle = async (r: any) => {
-    const { error } = await supabase.from("employees").update({ status: r.status === "active" ? "inactive" : "active" }).eq("id", r.id);
+    const deactivate = r.status === "active";
+    const leftOn: string | null = deactivate ? r.left_on || localToday() : null;
+    const { error } = await supabase.from("employees")
+      .update({ status: deactivate ? "inactive" : "active", left_on: leftOn }).eq("id", r.id);
     if (error) return toast.error(error.message);
+    if (leftOn) toast.success(`${r.name} marked inactive — left on ${shortDate(`${leftOn}T00:00:00`)} (edit to change the date)`);
     load();
   };
 
@@ -138,6 +161,7 @@ function EmployeesAdmin() {
   }, [pays]);
   const stateOf = (e: any, m: string) => monthState(e, m, byEmpMonth.get(`${e.id}|${m}`) ?? []);
   const last6 = useMemo(() => [5, 4, 3, 2, 1, 0].map((k) => addMonths(month, -k)), [month]);
+  const payLoading = paysMonth !== month;
 
   const summary = useMemo(() => {
     const s = { due: 0, paid: 0, covered: 0, outstanding: 0, nPaid: 0, nPartial: 0, nUnpaid: 0, people: 0 };
@@ -178,14 +202,32 @@ function EmployeesAdmin() {
     const taken = new Set((linked ?? []).map((l) => l.expense_id));
     setCandidates(matches.filter((x) => !taken.has(x.id)));
   };
+  // A new payment is stamped with the employee's CURRENT salary
+  // (salary_mark_paid), which then becomes the month's salary due — so the
+  // pay dialog measures what is left against that, not an older recorded one.
+  const remainingNow = (e: any, st: MonthState) => Math.max(round2((Number(e.salary) || 0) - st.paid), 0);
   const openPay = (e: any, m: string = month, mode?: "pay" | "unpay") => {
+    if (payLoading) return; // this month's payments are still loading
     if (payErr) return toast.error("Payroll is not set up yet — run the payroll migration in Supabase first.");
     const st = stateOf(e, m);
-    setPayForm({ ...emptyPay, amount: st.remaining > 0 ? String(st.remaining) : "", date: localToday() });
+    const remaining = remainingNow(e, st);
+    setAmountEdited(false);
+    setPayForm({ ...emptyPay, amount: remaining > 0 ? String(remaining) : "", date: localToday() });
     setPay({ emp: e, month: m, mode: mode ?? (st.status === "paid" ? "unpay" : "pay") });
     loadCandidates(e, m);
   };
-  const payState = pay ? stateOf(pay.emp, pay.month) : null;
+  const payEmp = pay ? rows.find((r) => r.id === pay.emp.id) ?? pay.emp : null;
+  const payState = pay && payEmp && !payLoading ? stateOf(payEmp, pay.month) : null;
+  const payDue = payEmp ? round2(Number(payEmp.salary) || 0) : 0;
+  const payRemaining = payEmp && payState ? remainingNow(payEmp, payState) : 0;
+  // Fresh figures while the dialog is open (a reload landed): re-seed the
+  // amount, unless the owner already typed one.
+  useEffect(() => {
+    if (!pay || pay.mode !== "pay" || !payState || amountEdited) return;
+    const next = payRemaining > 0 ? String(payRemaining) : "";
+    setPayForm((f) => (f.amount === next ? f : { ...f, amount: next }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pay?.emp.id, pay?.month, pay?.mode, !!payState, payRemaining, amountEdited]);
   const linkedExpense = candidates?.find((c) => c.id === payForm.expense) ?? null;
 
   const submitPay = async () => {
@@ -242,12 +284,19 @@ function EmployeesAdmin() {
               <Field label="Email"><Input value={form.email ?? ""} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
               <Field label="CNIC"><Input value={form.cnic ?? ""} onChange={(e) => setForm({ ...form, cnic: e.target.value })} /></Field>
               <Field label="Joining date"><Input type="date" value={form.joining_date ?? ""} onChange={(e) => setForm({ ...form, joining_date: e.target.value })} /></Field>
-              <Field label="Status" full>
-                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+              <Field label="Status" full={form.status === "active"}>
+                <Select value={form.status}
+                  onValueChange={(v) => setForm({ ...form, status: v, left_on: v === "active" ? "" : form.left_on || localToday() })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="inactive">Inactive</SelectItem></SelectContent>
                 </Select>
               </Field>
+              {form.status !== "active" && (
+                <Field label="Left on">
+                  <Input type="date" value={form.left_on ?? ""} title="Payroll keeps months up to this date due"
+                    onChange={(e) => setForm({ ...form, left_on: e.target.value })} />
+                </Field>
+              )}
               <Field label="Notes" full><Textarea value={form.notes ?? ""} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
             </div>
             <Button className="w-full mt-2" onClick={save}>Save</Button>
@@ -275,6 +324,12 @@ function EmployeesAdmin() {
           <div className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900">
             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
             <div>Payroll could not be loaded ({payErr}). If this is new, run <code>supabase/migrations/20261020000100_payroll.sql</code> in the Supabase SQL editor, then reload.</div>
+          </div>
+        ) : payLoading ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-busy="true">
+            {["Payroll due", "Paid", "Outstanding", "Employees paid"].map((l) => (
+              <Stat key={l} label={l} value="…" hint={`Loading ${monthLabel(month)}…`} />
+            ))}
           </div>
         ) : (
           <>
@@ -328,7 +383,9 @@ function EmployeesAdmin() {
                   <td className="p-3">{r.joining_date ? shortDate(r.joining_date) : "—"}</td>
                   <td className="p-3"><Badge variant={r.status === "active" ? "default" : "secondary"} className="cursor-pointer" onClick={() => toggle(r)}>{r.status}</Badge></td>
                   <td className="p-3">
-                    {payErr ? <span className="text-muted-foreground">—</span> : !st.eligible ? (
+                    {payErr ? <span className="text-muted-foreground">—</span> : payLoading ? (
+                      <span className="text-xs text-muted-foreground">Loading…</span>
+                    ) : !st.eligible ? (
                       <button type="button" onClick={() => openPay(r)}
                         className="rounded-lg border border-dashed px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted"
                         title={`Not due for ${monthLabel(month)} — click to record a payment anyway`}>
@@ -348,7 +405,12 @@ function EmployeesAdmin() {
                     )}
                   </td>
                   <td className="p-3">
-                    {!payErr && (
+                    {!payErr && payLoading && (
+                      <div className="flex items-center gap-1.5" aria-hidden>
+                        {last6.map((m) => <span key={m} className="h-3 w-3 rounded-full bg-muted animate-pulse" />)}
+                      </div>
+                    )}
+                    {!payErr && !payLoading && (
                       <div className="flex items-center gap-1.5">
                         {last6.map((m) => {
                           const ms = stateOf(r, m);
@@ -381,7 +443,12 @@ function EmployeesAdmin() {
               <DialogHeader>
                 <DialogTitle>Pay {pay.emp.name} — {monthLabel(pay.month)}</DialogTitle>
                 <DialogDescription>
-                  Salary due {money(payState.due)} · paid so far {money(payState.paid)} · remaining <b>{money(payState.remaining)}</b>
+                  Salary due {money(payDue)} · paid so far {money(payState.paid)} · remaining <b>{money(payRemaining)}</b>
+                  {payState.rows.length > 0 && payState.due !== payDue && (
+                    <span className="block text-[11px] mt-1">
+                      Earlier payments were against a salary of {money(payState.due)}; this payment records the current {money(payDue)} as {monthLabel(pay.month)}'s salary.
+                    </span>
+                  )}
                 </DialogDescription>
               </DialogHeader>
 
@@ -424,7 +491,8 @@ function EmployeesAdmin() {
               ) : (
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Amount (Rs)">
-                    <Input type="number" min={0} value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} />
+                    <Input type="number" min={0} value={payForm.amount}
+                      onChange={(e) => { setAmountEdited(true); setPayForm({ ...payForm, amount: e.target.value }); }} />
                   </Field>
                   <Field label="Date paid">
                     <Input type="date" value={payForm.date} onChange={(e) => setPayForm({ ...payForm, date: e.target.value })} />
@@ -435,9 +503,9 @@ function EmployeesAdmin() {
                       <SelectContent>{SALARY_METHODS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent>
                     </Select>
                   </Field>
-                  {payState.remaining > 0 && Number(payForm.amount) > payState.remaining && (
+                  {payRemaining > 0 && Number(payForm.amount) > payRemaining && (
                     <div className="col-span-2 text-[11px] text-muted-foreground">
-                      More than the {money(payState.remaining)} remaining — the extra is recorded as an advance in {monthLabel(pay.month)}.
+                      More than the {money(payRemaining)} remaining — the extra is recorded as an advance in {monthLabel(pay.month)}.
                     </div>
                   )}
                   {payForm.date && payForm.date < today && (

@@ -252,7 +252,10 @@ create table public.employees (
   salary numeric,
   id uuid primary key default gen_random_uuid(),
   email text,
-  cnic text
+  cnic text,
+  -- set when made inactive, cleared when reactivated (payroll keeps the
+  -- months they still worked due)
+  left_on date
 );
 
 create table public.reports_inbox (
@@ -375,9 +378,10 @@ create table public.amanat_items (
 );
 create index if not exists amanat_items_merchant_idx on public.amanat_items (merchant_id);
 
--- An item taken out of shelf stock on amanat is one stock_adjustments row.
+-- An item taken out of shelf stock on amanat is booked as dated
+-- stock_adjustments rows (given out, each return), linked by amanat_id.
 alter table public.stock_adjustments add column amanat_id uuid references public.amanat_items(id) on delete cascade;
-create unique index if not exists stock_adjustments_amanat_id_uidx
+create index if not exists stock_adjustments_amanat_id_idx
   on public.stock_adjustments (amanat_id) where amanat_id is not null;
 
 -- Monthly payroll (migration 20261020000100): one row per salary payment;
