@@ -6,7 +6,12 @@
 -- fix + backfill, pending-invoice auto-repair, transaction date
 -- backfill, the Amanat (security deposit) table, ledger↔account
 -- foreign keys (schema-cache relationship fix), product price repair,
--- invoice payment-method label sync, and the product-images bucket.
+-- invoice payment-method label sync, the product-images bucket,
+-- business settings + duplicate-product merge, the stock ledger,
+-- Customer/Merchant Amanat, monthly payroll, admin roles, product
+-- clean-up (sold-out junk purge + history guard) and live dashboard.
+-- Sab se aakhir mein har product ka stock ledger ke mutabiq dobara
+-- set ho jata hai, is liye yeh file kabhi bhi dobara chalayi ja sakti hai.
 -- ============================================================
 
 -- Daily closing reports: one row per closed day with the snapshot of that
@@ -802,3 +807,514 @@ begin
 end $$;
 
 notify pgrst, 'reload schema';
+
+-- Amanat for both sides: Customer Amanat and Merchant Amanat.
+--
+-- Amanat is anything held in trust between the shop and a party, either way
+-- round, seen from the shop:
+--   direction 'taken' — the party took our item / money (it is with them)
+--   direction 'left'  — the party left their item / money with us (we hold it)
+--   status 'pending'  — still open
+--   status 'received' — settled (received back / handed back)
+-- An entry belongs to a customer (client_id) or a merchant (merchant_id) and
+-- is either goods (kind 'item', quantity) or cash (kind 'money', amount).
+--
+-- Amanat never touches client_ledger / merchant_ledger: money held in trust
+-- is not part of the account balance (the app shows it beside the balance).
+--
+-- An item taken from shelf stock (from_stock) is booked as one
+-- stock_adjustments row per amanat ('Amanat' reason, linked by amanat_id) and
+-- the stock ledger triggers move products.quantity_in_stock from it: giving
+-- the item out takes the units off, a partial return or "received" gives
+-- them back, deleting the amanat deletes its row (cascade) and gives them
+-- back. Items a party LEFT with us are not ours and never add to stock.
+-- Existing rows keep from_stock = false, so nothing changes retroactively.
+--
+-- Needs 20261015000000_stock_ledger.sql. Safe to re-run (no drops).
+
+-- 1. Columns.
+alter table public.amanat_items add column if not exists party_type text not null default 'client';
+alter table public.amanat_items add column if not exists merchant_id uuid references public.merchants(id) on delete set null;
+alter table public.amanat_items add column if not exists direction text not null default 'taken';
+alter table public.amanat_items add column if not exists kind text not null default 'item';
+alter table public.amanat_items add column if not exists amount numeric;
+alter table public.amanat_items add column if not exists contact text;
+alter table public.amanat_items add column if not exists from_stock boolean not null default false;
+
+-- 2. Status words: out -> pending, returned -> received.
+update public.amanat_items
+   set status = case when status in ('returned', 'received') then 'received' else 'pending' end
+ where status is distinct from 'pending' and status is distinct from 'received';
+alter table public.amanat_items alter column status set default 'pending';
+
+-- Old rows may carry quantities the checks below reject; bring them in range
+-- (a received row has everything back).
+update public.amanat_items set quantity = 1 where quantity is null or quantity < 1;
+update public.amanat_items
+   set returned_quantity = case when status = 'received' then quantity
+                                else least(greatest(coalesce(returned_quantity, 0), 0), quantity) end
+ where returned_quantity is null or returned_quantity < 0 or returned_quantity > quantity;
+
+-- 3. Rules.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'amanat_items_party_type_chk') then
+    alter table public.amanat_items add constraint amanat_items_party_type_chk
+      check (party_type in ('client', 'merchant'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'amanat_items_direction_chk') then
+    alter table public.amanat_items add constraint amanat_items_direction_chk
+      check (direction in ('taken', 'left'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'amanat_items_status_chk') then
+    alter table public.amanat_items add constraint amanat_items_status_chk
+      check (status in ('pending', 'received'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'amanat_items_kind_chk') then
+    alter table public.amanat_items add constraint amanat_items_kind_chk
+      check (kind in ('item', 'money'));
+  end if;
+  -- a customer entry never points at a merchant and vice versa
+  if not exists (select 1 from pg_constraint where conname = 'amanat_items_party_chk') then
+    alter table public.amanat_items add constraint amanat_items_party_chk
+      check ((party_type = 'client' and merchant_id is null) or (party_type = 'merchant' and client_id is null));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'amanat_items_money_amount_chk') then
+    alter table public.amanat_items add constraint amanat_items_money_amount_chk
+      check (kind <> 'money' or coalesce(amount, 0) > 0);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'amanat_items_quantity_chk') then
+    alter table public.amanat_items add constraint amanat_items_quantity_chk
+      check (quantity > 0);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'amanat_items_returned_qty_chk') then
+    alter table public.amanat_items add constraint amanat_items_returned_qty_chk
+      check (returned_quantity between 0 and quantity);
+  end if;
+end $$;
+
+create index if not exists amanat_items_merchant_idx on public.amanat_items (merchant_id);
+
+-- 4. Shelf stock for items taken out of stock.
+alter table public.stock_adjustments add column if not exists amanat_id uuid references public.amanat_items(id) on delete cascade;
+create unique index if not exists stock_adjustments_amanat_id_uidx
+  on public.stock_adjustments (amanat_id) where amanat_id is not null;
+
+-- Keeps the amanat's one adjustment row equal to the units still out:
+-- -(quantity - returned), 0 (no row) once received or when not from stock.
+create or replace function public.amanat_stock_sync()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  want integer := 0;
+  tracked boolean;
+begin
+  if new.from_stock and new.kind = 'item' and new.direction = 'taken' and new.product_id is not null then
+    select p.track_stock into tracked from public.products p where p.id = new.product_id;
+    if coalesce(tracked, false) then
+      want := -(new.quantity - case when new.status = 'received' then new.quantity
+                                    else least(greatest(coalesce(new.returned_quantity, 0), 0), new.quantity) end);
+    end if;
+  end if;
+
+  if want = 0 then
+    delete from public.stock_adjustments where amanat_id = new.id;
+  else
+    insert into public.stock_adjustments (product_id, delta, reason, note, amanat_id)
+    values (new.product_id, want, 'Amanat', coalesce(new.amanat_no, 'Amanat') || ' — ' || new.customer_name, new.id)
+    on conflict (amanat_id) where amanat_id is not null do update
+      set product_id = excluded.product_id, delta = excluded.delta, reason = excluded.reason, note = excluded.note
+      where (stock_adjustments.product_id, stock_adjustments.delta, stock_adjustments.reason, stock_adjustments.note)
+            is distinct from (excluded.product_id, excluded.delta, excluded.reason, excluded.note);
+  end if;
+  return null;
+end $$;
+
+create or replace trigger amanat_stock_sync
+  after insert or update on public.amanat_items
+  for each row execute function public.amanat_stock_sync();
+
+notify pgrst, 'reload schema';
+
+-- Payroll: which month's salary each employee has been paid.
+--
+-- The Employees page only knew each person's fixed salary; whether a month
+-- had actually been paid lived in the owner's head (and in hand-typed
+-- Expenses such as "zain 25000" or "Zain ko dea 5000"). Now every salary
+-- payment is a row here, for one employee and one month (YYYY-MM). A month
+-- may hold several rows (advances, part payments); its status is derived:
+-- Paid when the payments add up to the salary due, Partial below that,
+-- Unpaid when there are none.
+--
+-- Every payment is ALSO an expense, exactly once, because Expenses drive the
+-- Daily Closing net cash, Reports and the Dashboard profit:
+--   * paid from the Employees page -> salary_mark_paid() creates the expense
+--     ("Salary — Zain") and links it (expense_created = true);
+--   * already typed in Expenses by hand -> the owner links that expense
+--     instead (expense_created = false), so it is never counted twice.
+-- Deleting the expense on the Expenses page deletes its payment with it (the
+-- month goes back to Unpaid/Partial). Marking a month unpaid removes the
+-- expenses payroll created and leaves hand-typed ones (that cash really went
+-- out). Deleting an employee deletes their payroll history; the expenses stay.
+--
+-- Safe to re-run: nothing is dropped, policies are created only if missing.
+
+-- 1. The payments.
+create table if not exists public.salary_payments (
+  id uuid primary key default gen_random_uuid(),
+  employee_id uuid not null references public.employees(id) on delete cascade,
+  month text not null check (month ~ '^\d{4}-(0[1-9]|1[0-2])$'),
+  amount numeric not null check (amount > 0),
+  -- employees.salary when the payment was recorded (a later raise does not
+  -- rewrite what was due in an old month)
+  salary_due numeric not null default 0,
+  paid_date date not null default current_date,
+  method text not null default 'cash',
+  expense_id uuid unique references public.expenses(id) on delete cascade,
+  -- false = linked to an expense the owner typed by hand
+  expense_created boolean not null default true,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists salary_payments_month_idx on public.salary_payments (month);
+create index if not exists salary_payments_employee_month_idx on public.salary_payments (employee_id, month);
+
+-- 2. Admin only (salaries are nobody else's business).
+alter table public.salary_payments enable row level security;
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'salary_payments' and policyname = 'salary payments admin') then
+    create policy "salary payments admin" on public.salary_payments for all to authenticated
+      using (public.has_role((select auth.uid()), 'admin'))
+      with check (public.has_role((select auth.uid()), 'admin'));
+  end if;
+end $$;
+
+-- 3. Record a payment for an employee's month, with its expense, in one
+--    transaction. With _expense: link that (hand-typed) expense — its amount
+--    and date are the payment's. Without: _amount is paid on _paid_date and
+--    a "Salary — <name>" expense is created for it. Returns the payment id.
+create or replace function public.salary_mark_paid(
+  _employee uuid,
+  _month text,
+  _amount numeric default null,
+  _paid_date date default current_date,
+  _method text default 'cash',
+  _expense uuid default null,
+  _notes text default null
+)
+returns uuid language plpgsql set search_path = public as $$
+declare
+  emp_name text;
+  emp_salary numeric;
+  exp_amount numeric;
+  exp_date date;
+  m text := lower(coalesce(nullif(trim(_method), ''), 'cash'));
+  note text := nullif(trim(coalesce(_notes, '')), '');
+  month_label text;
+  method_label text;
+  amt numeric;
+  d date;
+  eid uuid;
+  pid uuid;
+begin
+  if _month is null or _month !~ '^\d{4}-(0[1-9]|1[0-2])$' then
+    raise exception 'Month must look like YYYY-MM (got %)', coalesce(_month, 'nothing');
+  end if;
+  select e.name, e.salary into emp_name, emp_salary from public.employees e where e.id = _employee;
+  if not found then raise exception 'Employee not found'; end if;
+  month_label := to_char(to_date(_month || '-01', 'YYYY-MM-DD'), 'Mon YYYY');
+
+  if _expense is not null then
+    select x.amount, x.date_of_expense into exp_amount, exp_date from public.expenses x where x.id = _expense;
+    if not found then raise exception 'That expense no longer exists'; end if;
+    if exists (select 1 from public.salary_payments s where s.expense_id = _expense) then
+      raise exception 'That expense is already linked to a salary payment';
+    end if;
+    if coalesce(exp_amount, 0) <= 0 then raise exception 'That expense has no amount'; end if;
+    amt := exp_amount;
+    d := coalesce(exp_date, current_date);
+    eid := _expense;
+  else
+    if _amount is null or _amount <= 0 then raise exception 'Amount must be more than zero'; end if;
+    amt := _amount;
+    d := coalesce(_paid_date, current_date);
+    method_label := case m
+      when 'cash' then 'Cash' when 'jazzcash' then 'JazzCash' when 'easypaisa' then 'Easypaisa'
+      when 'bank' then 'Bank transfer' when 'card' then 'Card' when 'other' then 'Other'
+      else m end;
+    insert into public.expenses (expense_type, amount, notes, date_of_expense)
+    values ('Salary — ' || coalesce(nullif(trim(emp_name), ''), 'employee'), amt,
+            'Salary for ' || month_label || ' · ' || method_label || coalesce(' · ' || note, ''), d)
+    returning id into eid;
+  end if;
+
+  begin
+    insert into public.salary_payments (employee_id, month, amount, salary_due, paid_date, method, expense_id, expense_created, notes)
+    values (_employee, _month, amt, coalesce(emp_salary, 0), d, m, eid, _expense is null, note)
+    returning id into pid;
+  exception when unique_violation then
+    -- two phones linking the same expense at once
+    raise exception 'That expense is already linked to a salary payment';
+  end;
+  return pid;
+end $$;
+revoke execute on function public.salary_mark_paid(uuid, text, numeric, date, text, uuid, text) from public, anon;
+grant execute on function public.salary_mark_paid(uuid, text, numeric, date, text, uuid, text) to authenticated;
+
+-- 4. Undo a month: its payments go, and so do the expenses payroll created
+--    for them (out of Expenses and the Daily Closing). Hand-typed expenses
+--    that were only linked stay — that cash really went out. Returns the
+--    number of payments removed.
+create or replace function public.salary_mark_unpaid(_employee uuid, _month text)
+returns integer language plpgsql set search_path = public as $$
+declare
+  n integer;
+  created uuid[];
+begin
+  if _month is null or _month !~ '^\d{4}-(0[1-9]|1[0-2])$' then
+    raise exception 'Month must look like YYYY-MM (got %)', coalesce(_month, 'nothing');
+  end if;
+  with gone as (
+    delete from public.salary_payments s
+    where s.employee_id = _employee and s.month = _month
+    returning s.expense_id, s.expense_created
+  )
+  select count(*)::integer,
+         coalesce(array_agg(g.expense_id) filter (where g.expense_created and g.expense_id is not null), '{}')
+    into n, created
+  from gone g;
+  if cardinality(created) > 0 then
+    delete from public.expenses x where x.id = any(created);
+  end if;
+  return n;
+end $$;
+revoke execute on function public.salary_mark_unpaid(uuid, text) from public, anon;
+grant execute on function public.salary_mark_unpaid(uuid, text) to authenticated;
+
+notify pgrst, 'reload schema';
+
+-- Admin access managed from the app (Admin → Users) + the profile phone field.
+-- Safe to re-run (idempotent; nothing is dropped).
+--
+-- The shop was set up with a developer's admin login. Rather than baking
+-- anyone's email or password into the code, admins now grant and revoke
+-- admin access themselves: the owner signs up (or resets the password) with
+-- their own email, an existing admin grants it admin in Admin → Users, and
+-- the developer account is revoked once the owner's login works.
+
+-- 1. Profile phone. "Save profile" on Admin → Profile writes it; the column
+--    was missing, so saving the profile failed.
+alter table public.profiles add column if not exists phone text;
+
+-- 2. Admins may grant and revoke roles (insert / delete rows). There is no
+--    update policy: a role is changed by revoking one and granting another.
+--    Everyone else can still only add the plain customer role to their own
+--    account at sign-up ("roles self customer").
+do $$
+begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'user_roles' and policyname = 'roles admin insert') then
+    create policy "roles admin insert" on public.user_roles for insert to authenticated
+      with check (public.has_role((select auth.uid()), 'admin'));
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'user_roles' and policyname = 'roles admin delete') then
+    create policy "roles admin delete" on public.user_roles for delete to authenticated
+      using (public.has_role((select auth.uid()), 'admin'));
+  end if;
+end $$;
+
+-- 3. Never lock everyone out: removing the last admin role is refused, from
+--    the app or anywhere else. The advisory lock makes two admins revoking
+--    each other at the same moment take turns, so one of them is refused.
+create or replace function public.user_roles_keep_one_admin()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if old.role = 'admin' then
+    perform pg_advisory_xact_lock(hashtext('public.user_roles_keep_one_admin'));
+    if not exists (select 1 from public.user_roles r where r.role = 'admin' and r.id <> old.id) then
+      raise exception 'At least one admin must remain' using errcode = 'P0001',
+        hint = 'Grant admin to another account before revoking this one.';
+    end if;
+  end if;
+  return old;
+end $$;
+revoke execute on function public.user_roles_keep_one_admin() from public, anon;
+
+create or replace trigger user_roles_keep_one_admin
+  before delete on public.user_roles
+  for each row execute function public.user_roles_keep_one_admin();
+
+-- 4. Every sign-in account for Admin → Users, including accounts that never
+--    got a profile row, with roles and last sign-in. Admins only.
+create or replace function public.admin_list_users()
+returns table (
+  id uuid,
+  email text,
+  full_name text,
+  created_at timestamptz,
+  last_sign_in_at timestamptz,
+  roles text[]
+)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not coalesce(public.has_role(auth.uid(), 'admin'), false) then
+    raise exception 'Admins only' using errcode = '42501';
+  end if;
+  return query
+    select u.id,
+           coalesce(u.email, p.email)::text,
+           p.full_name,
+           u.created_at,
+           u.last_sign_in_at,
+           coalesce(
+             array(select r.role::text from public.user_roles r where r.user_id = u.id order by r.role::text),
+             '{}'::text[]
+           )
+      from auth.users u
+      left join public.profiles p on p.id = u.id
+     order by u.created_at desc nulls last;
+end $$;
+revoke execute on function public.admin_list_users() from public, anon;
+grant execute on function public.admin_list_users() to authenticated;
+
+-- Product clean-up: sold-out junk out of the database, history kept.
+--
+-- Sold-out products cluttered every list and picker, and deleting one by hand
+-- blanked the product on its old sale lines, purchases and sales history
+-- (stock_purchases / customer_purchases keep no name of their own) and lost
+-- its prices — so restocking it meant typing it in again as a duplicate.
+-- From here on:
+--   * a sold-out product that never did anything (no sale, purchase, quote,
+--     amanat or stock count) is purged — it is just a name;
+--   * a product with history can no longer be deleted: the app hides it from
+--     every browse list while it is out of stock (typing its name still finds
+--     it) and it comes back by itself when stock is booked, so restocking
+--     reuses the same record;
+--   * one product per name (normalised: trimmed, single spaces, any case).
+--
+-- Duplicate-name copies are folded together by the merge in
+-- RUN_THIS_IN_SUPABASE.sql (20261004 §2). That merge re-points every ledger
+-- row to the keeper before deleting the copies, so the guard below never
+-- blocks it. Copies are left for the merge here (their image, description or
+-- category may be what the keeper lacks); re-running this file after the
+-- merge purges a keeper that is junk too.
+--
+-- Needs 20261015000000_stock_ledger.sql (track_stock, stock_adjustments).
+-- Safe to re-run (idempotent, no drops).
+
+-- 1. Indexes for the history checks (sale lines, purchases and counts are
+--    indexed by 20261015; these three were not).
+create index if not exists customer_purchases_product_id_idx on public.customer_purchases (product_id);
+create index if not exists quotation_items_product_id_idx    on public.quotation_items (product_id);
+create index if not exists amanat_items_product_id_idx       on public.amanat_items (product_id);
+
+-- 2. Purge sold-out products with no history at all: a stock-tracked product
+--    at or below zero (or, as 20261004 §3 already did, an untracked bare name
+--    with no price, image, description, category, brand or website flag)
+--    that was never sold, bought, quoted, given on amanat or counted.
+--    Untracked services/trade-ins with a price are always sellable and stay.
+--    A product added in the last week is left alone: it may have been
+--    entered ahead of its first delivery.
+delete from public.products p
+where coalesce(p.quantity_in_stock, 0) <= 0
+  and p.created_at < now() - interval '7 days'
+  and (p.track_stock is distinct from false
+       or (coalesce(p.selling_price, 0) = 0 and coalesce(p.purchase_price, 0) = 0
+           and coalesce(p.image_url, '') = '' and coalesce(p.description, '') = ''
+           and p.category_id is null and p.brand_id is null
+           and not coalesce(p.is_featured, false) and not coalesce(p.is_deal, false)))
+  and not exists (select 1 from public.invoice_items      x where x.product_id = p.id)
+  and not exists (select 1 from public.customer_purchases x where x.product_id = p.id)
+  and not exists (select 1 from public.stock_purchases    x where x.product_id = p.id)
+  and not exists (select 1 from public.quotation_items    x where x.product_id = p.id)
+  and not exists (select 1 from public.amanat_items       x where x.product_id = p.id)
+  and not exists (select 1 from public.stock_adjustments  x where x.product_id = p.id)
+  -- a duplicate-name copy is the merge's to fold into its keeper
+  and not exists (
+    select 1 from public.products o
+    where o.id <> p.id
+      and lower(regexp_replace(trim(o.product_name), '\s+', ' ', 'g'))
+        = lower(regexp_replace(trim(p.product_name), '\s+', ' ', 'g')));
+
+-- 3. A product with history is kept for the records. Its sale lines,
+--    purchases, sales history, quotations and amanat entries would otherwise
+--    lose the product (ON DELETE SET NULL) — and with it the purchase and
+--    sales figures per product. Stock counts alone do not block a delete
+--    (they cascade with the product). SECURITY DEFINER so the check sees
+--    every row whatever the caller's row-level security allows.
+create or replace function public.products_keep_history()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from public.invoice_items      where product_id = old.id)
+     or exists (select 1 from public.stock_purchases    where product_id = old.id)
+     or exists (select 1 from public.customer_purchases where product_id = old.id)
+     or exists (select 1 from public.quotation_items    where product_id = old.id)
+     or exists (select 1 from public.amanat_items       where product_id = old.id) then
+    raise exception 'This product has sales or purchase history and is kept for the records; it stays hidden while out of stock and returns when restocked.'
+      using errcode = 'P0001',
+            detail = format('product %s (%s)', old.id, coalesce(old.product_name, '')),
+            hint = 'Re-point or delete its sale, purchase, quotation and amanat rows first.';
+  end if;
+  return old;
+end $$;
+revoke execute on function public.products_keep_history() from public, anon, authenticated;
+
+create or replace trigger products_keep_history
+  before delete on public.products
+  for each row execute function public.products_keep_history();
+
+-- 4. One product per name, so re-entering a product can never create a
+--    conflicting copy (the app already reuses an existing name). Skipped with
+--    a notice until the duplicate merge has folded the old copies together.
+do $$
+begin
+  if exists (
+    select 1 from public.products
+    group by lower(regexp_replace(trim(product_name), '\s+', ' ', 'g')) having count(*) > 1
+  ) then
+    raise notice 'duplicate product names remain — unique name index skipped; run the duplicate merge (RUN_THIS_IN_SUPABASE.sql) first';
+  else
+    create unique index if not exists products_name_norm_uidx
+      on public.products ((lower(regexp_replace(trim(product_name), '\s+', ' ', 'g'))));
+  end if;
+end $$;
+
+notify pgrst, 'reload schema';
+
+-- Live dashboard: publish the tables the dashboard listens to.
+--
+-- The dashboard subscribes to Supabase Realtime (postgres_changes) and
+-- reloads its figures a moment after a sale, payment, expense, purchase or
+-- stock correction lands. Realtime only sends changes for tables that are
+-- members of the supabase_realtime publication, which had none.
+--
+-- Safe to re-run: the publication is created only when missing, and each
+-- table is added only when it exists and is not a member yet (adding a
+-- member twice is an error). Nothing is dropped. A publication defined
+-- FOR ALL TABLES already covers every table and is left alone.
+
+do $$
+declare
+  t text;
+begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    create publication supabase_realtime;
+  end if;
+
+  if (select puballtables from pg_publication where pubname = 'supabase_realtime') then
+    return;
+  end if;
+
+  foreach t in array array[
+    'invoices', 'invoice_items', 'invoice_payments', 'customer_purchases',
+    'client_ledger', 'expenses', 'stock_purchases', 'stock_adjustments', 'products'
+  ] loop
+    if to_regclass(format('public.%I', t)) is not null
+       and not exists (
+         select 1 from pg_publication_tables
+         where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+       ) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
+end $$;
