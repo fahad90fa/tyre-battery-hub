@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { supabase } from "@/integrations/supabase/client";
 import { money, localDateOf } from "@/lib/format";
@@ -56,6 +56,11 @@ function ProductsAdmin() {
   // actually found — the difference becomes a stock_adjustments row.
   const [currentStock, setCurrentStock] = useState(0);
   const [counted, setCounted] = useState("");
+  // Only a count the owner actually typed is booked — opening and saving the
+  // dialog for a price change must never touch stock.
+  const [countTouched, setCountTouched] = useState(false);
+  const countTouchedRef = useRef(false);
+  useEffect(() => { countTouchedRef.current = countTouched; }, [countTouched]);
   const [reason, setReason] = useState<string>(ADJUST_REASONS[0]);
   const [note, setNote] = useState("");
 
@@ -75,7 +80,7 @@ function ProductsAdmin() {
 
   const startNew = () => {
     setEditing(null); setForm(empty); setOpeningStock("");
-    setCurrentStock(0); setCounted(""); setReason(ADJUST_REASONS[0]); setNote("");
+    setCurrentStock(0); setCounted(""); setCountTouched(false); setReason(ADJUST_REASONS[0]); setNote("");
   };
 
   const save = async () => {
@@ -86,7 +91,7 @@ function ProductsAdmin() {
 
   // The counted figure as a whole number; blank means "unchanged".
   const countedN = counted.trim() === "" ? currentStock : Math.round(Number(counted) || 0);
-  const stockDelta = form.track_stock ? countedN - currentStock : 0;
+  const stockDelta = form.track_stock && countTouched ? countedN - currentStock : 0;
 
   const persist = async () => {
     const name = form.product_name.trim().replace(/\s+/g, " ");
@@ -116,14 +121,21 @@ function ProductsAdmin() {
       const { data, error } = await supabase.from("products").update(payload).eq("id", editing).select("id").maybeSingle();
       if (error) return toast.error(describe(error));
       if (!data) return toast.error("Product not found — refresh the page");
-      if (stockDelta !== 0) {
-        const { error: adjErr } = await supabase.from("stock_adjustments").insert({
-          product_id: editing, delta: stockDelta, reason, note: note.trim() || null,
+      if (form.track_stock && countTouched && counted.trim() !== "") {
+        // The database books the difference to the LIVE ledger figure in one
+        // statement, so a sale made since this page was opened cannot skew it.
+        const { data: delta, error: adjErr } = await supabase.rpc("stock_set_count", {
+          _product: editing, _counted: countedN, _reason: reason, _note: note.trim() || null,
         });
-        // The product details are saved; keep the dialog open so the count
-        // can be retried without retyping it.
-        if (adjErr) return toast.error(`Product saved, but the stock adjustment failed: ${adjErr.message}`);
-        toast.success(`Product updated — stock ${stockDelta > 0 ? "+" : ""}${stockDelta} (${reason})`);
+        if (adjErr) {
+          // The product details are saved; refresh so a retry starts from them.
+          await load();
+          return toast.error(`Product saved, but the stock count failed: ${adjErr.message}`);
+        }
+        const d = Number(delta) || 0;
+        toast.success(d === 0
+          ? "Product updated — stock already matched the count"
+          : `Product updated — stock ${d > 0 ? "+" : ""}${d} (${reason}), now ${countedN}`);
       } else {
         toast.success("Product updated");
       }
@@ -169,9 +181,16 @@ function ProductsAdmin() {
       deal_end_date: r.deal_end_date ? (localDateOf(r.deal_end_date) || String(r.deal_end_date).slice(0, 10)) : "",
     });
     const stock = stockOf(r);
-    setCurrentStock(stock); setCounted(String(stock)); setReason(ADJUST_REASONS[0]); setNote("");
+    setCurrentStock(stock); setCounted(String(stock)); setCountTouched(false); setReason(ADJUST_REASONS[0]); setNote("");
     setOpeningStock("");
     setOpen(true);
+    // The list may be minutes old: show the live figure.
+    supabase.from("products").select("quantity_in_stock").eq("id", r.id).maybeSingle().then(({ data }) => {
+      if (!data) return;
+      const live = stockOf(data);
+      setCurrentStock(live);
+      if (!countTouchedRef.current) setCounted(String(live));
+    });
   };
 
   return (
@@ -248,7 +267,7 @@ function ProductsAdmin() {
                   <div className="text-sm font-semibold">Adjust stock</div>
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Counted stock">
-                      <Input type="number" step="1" min="0" value={counted} onChange={(e) => setCounted(e.target.value)} />
+                      <Input type="number" step="1" min="0" value={counted} onChange={(e) => { setCounted(e.target.value); setCountTouched(true); }} />
                     </Field>
                     <Field label="Reason">
                       <Select value={reason} onValueChange={setReason}>

@@ -1069,6 +1069,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      stock_set_count: {
+        Args: { _product: string; _counted: number; _reason?: string; _note?: string | null }
+        Returns: number
+      }
       client_ledger_delta: {
         Args: { _amount: number; _type: string }
         Returns: number

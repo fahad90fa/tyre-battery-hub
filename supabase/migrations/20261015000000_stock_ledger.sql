@@ -10,7 +10,13 @@
 -- shrinking a sale line gives the units back by itself; a purchase row adds
 -- them by itself. The counter may go below zero (sold before the purchase
 -- was booked); the app shows anything at or below zero as "Out of stock".
--- Safe to re-run (idempotent).
+--
+-- Nothing else may write the counter: a guard trigger ignores direct writes
+-- (the old app's read-modify-write, a stale browser tab, a hand edit in the
+-- table editor), so this file can run before or after the app update without
+-- double counting. Run it BEFORE deploying the app version that uses it (that
+-- version reads products.track_stock). Safe to re-run: every run ends by
+-- resyncing each product to its ledger.
 
 -- 1. Counts and corrections (opening stock, physical counts, damaged units,
 --    returns to the merchant) as ledger rows instead of overwrites.
@@ -62,11 +68,34 @@ returns integer language sql stable set search_path = public as $$
        + coalesce((select sum(delta)    from public.stock_adjustments where product_id = _product), 0)::integer;
 $$;
 
+-- The one door to the counter. It raises the app.stock_sync flag for the
+-- duration of its update so the guard below lets the write through.
 create or replace function public.stock_apply(_product uuid, _delta integer)
-returns void language sql set search_path = public as $$
-  update public.products set quantity_in_stock = coalesce(quantity_in_stock, 0) + _delta
-  where id = _product and _delta <> 0;
-$$;
+returns void language plpgsql set search_path = public as $$
+declare prev text := current_setting('app.stock_sync', true);
+begin
+  if _product is null or coalesce(_delta, 0) = 0 then return; end if;
+  perform set_config('app.stock_sync', 'on', true);
+  update public.products set quantity_in_stock = coalesce(quantity_in_stock, 0) + _delta where id = _product;
+  perform set_config('app.stock_sync', coalesce(prev, ''), true);
+end $$;
+-- only the ledger triggers (owned by the database) may call it
+revoke execute on function public.stock_apply(uuid, integer) from public, anon, authenticated;
+
+-- Set every listed product (all when null) to its ledger figure.
+create or replace function public.stock_resync(_products uuid[] default null)
+returns integer language plpgsql security definer set search_path = public as $$
+declare prev text := current_setting('app.stock_sync', true); n integer;
+begin
+  perform set_config('app.stock_sync', 'on', true);
+  update public.products p set quantity_in_stock = public.stock_derived(p.id)
+  where (_products is null or p.id = any(_products))
+    and p.quantity_in_stock <> public.stock_derived(p.id);
+  get diagnostics n = row_count;
+  perform set_config('app.stock_sync', coalesce(prev, ''), true);
+  return n;
+end $$;
+revoke execute on function public.stock_resync(uuid[]) from public, anon;
 
 -- One trigger function for all three ledgers: purchases and adjustments add,
 -- sale lines subtract; an update moves the difference (and moves the units
@@ -105,6 +134,59 @@ create or replace trigger stock_ledger_adjustments
   after insert or update or delete on public.stock_adjustments
   for each row execute function public.stock_ledger_sync();
 
+-- Guard: a direct write of the counter (anything but stock_apply/stock_resync)
+-- is ignored — the value stays what the ledger made it.
+create or replace function public.stock_ledger_guard()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if current_setting('app.stock_sync', true) is distinct from 'on' then
+    new.quantity_in_stock := old.quantity_in_stock;
+  end if;
+  return new;
+end $$;
+create or replace trigger stock_ledger_guard
+  before update of quantity_in_stock on public.products
+  for each row execute function public.stock_ledger_guard();
+
+-- A product created with a starting count (the old Products page, a CSV
+-- import) gets that count recorded as an "Opening count" ledger row.
+create or replace function public.stock_ledger_opening()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare prev text := current_setting('app.stock_sync', true);
+begin
+  if coalesce(new.quantity_in_stock, 0) <> 0 and prev is distinct from 'on' then
+    perform set_config('app.stock_sync', 'on', true);
+    update public.products set quantity_in_stock = 0 where id = new.id;
+    perform set_config('app.stock_sync', coalesce(prev, ''), true);
+    insert into public.stock_adjustments (product_id, delta, reason, note)
+    values (new.id, new.quantity_in_stock, 'Opening count', 'Stock entered with the new product');
+  end if;
+  return null;
+end $$;
+create or replace trigger stock_ledger_opening
+  after insert on public.products
+  for each row execute function public.stock_ledger_opening();
+
+-- A physical count, booked as the difference to the live ledger figure in a
+-- single statement (no stale number from a page opened earlier). Returns the
+-- difference recorded (0 records nothing).
+create or replace function public.stock_set_count(_product uuid, _counted integer, _reason text default 'Physical count', _note text default null)
+returns integer language plpgsql set search_path = public as $$
+declare d integer;
+begin
+  if _counted is null or _counted < 0 then raise exception 'Counted stock must be zero or more'; end if;
+  perform 1 from public.products where id = _product for update;
+  if not found then raise exception 'Product not found'; end if;
+  d := _counted - public.stock_derived(_product);
+  if d <> 0 then
+    insert into public.stock_adjustments (product_id, delta, reason, note)
+    values (_product, d, coalesce(nullif(trim(_reason), ''), 'Physical count'), nullif(trim(coalesce(_note, '')), ''));
+  end if;
+  return d;
+end $$;
+revoke execute on function public.stock_set_count(uuid, integer, text, text) from public, anon;
+grant execute on function public.stock_set_count(uuid, integer, text, text) to authenticated;
+
 -- Products whose counter disagrees with the ledger (should stay empty).
 create or replace view public.stock_reconciliation as
   select p.id, p.product_name, p.quantity_in_stock as stored, public.stock_derived(p.id) as derived
@@ -121,8 +203,6 @@ create or replace view public.stock_reconciliation as
 --    including below zero where units were sold that were never booked in,
 --    which the app now shows as out of stock until the purchase is entered.
 do $$
-declare
-  import_day date := '2026-07-15';
 begin
   if exists (select 1 from public.app_settings where key = 'stock_ledger_backfill') then return; end if;
 
@@ -134,35 +214,42 @@ begin
     and not exists (select 1 from public.stock_adjustments x where x.product_id = p.id);
 
   insert into public.stock_adjustments (product_id, delta, reason, note)
-  select v.id::uuid, v.delta, 'Opening stock', 'Old register count minus the purchases imported with it (2026-07-15 import)'
+  -- (opening count − purchases imported − legacy sales imported, per the
+  --  2026-07-16 import file; a positive gap is stock with no purchase row, a
+  --  negative one units sold before the system existed)
+  select v.id::uuid, v.delta, 'Opening stock', 'Old register count minus the purchases and sales imported with it (2026-07-15 import)'
   from (values
     ('b3198079-a292-4c3c-8514-005c61d6000b', 35),  -- Sunfull
-    ('51bb62ad-1708-4670-a5e3-3f9eae95c73d',  8),  -- Goform 155/65R14
+    ('3952bec9-9db2-4646-899e-67dda5aabb7b', -1),  -- 185R14
+    ('d06c8f5d-23af-4491-be2c-b3382cafb659', -2),  -- Evergreen 145R12
     ('5802e98a-e32f-4828-aa21-d0d444bdd2ca', -2),  -- Ovation 195/65R15
     ('9302b467-c9cc-4b15-ba23-5f0bcc9da30b', -1),  -- HT200 osaka 21p
     ('f30133de-bdeb-4617-a331-77943d8483f9', -1),  -- HT160 osaka 19p
+    ('e0a74211-bf17-44df-9119-e0de840f7c53', -2),  -- Michelin 215/75R14
     ('16503174-2cfb-4f64-a860-6fd47b50d48b', -1)   -- 500-12 Tube Diamond
   ) as v(id, delta)
   where exists (select 1 from public.products p where p.id = v.id::uuid)
     and not exists (select 1 from public.stock_adjustments a where a.product_id = v.id::uuid and a.reason = 'Opening stock');
 
+  -- A count typed on the Products page (never booked as a purchase) is the
+  -- counter plus whatever has been sold from it since: record that gap.
   insert into public.stock_adjustments (product_id, delta, reason, note)
-  select p.id, p.quantity_in_stock, 'Opening count', 'Starting stock entered on the Products page'
+  select p.id, p.quantity_in_stock - public.stock_derived(p.id), 'Opening count',
+         'Starting stock entered on the Products page (count shown plus units sold since)'
   from public.products p
-  where p.created_at::date > import_day
-    and p.quantity_in_stock > 0
+  where p.quantity_in_stock > 0
+    and p.quantity_in_stock <> public.stock_derived(p.id)
     and not exists (select 1 from public.stock_purchases   x where x.product_id = p.id)
-    and not exists (select 1 from public.invoice_items     x where x.product_id = p.id)
     and not exists (select 1 from public.stock_adjustments x where x.product_id = p.id);
-
-  -- the inserts above already moved the counter through the trigger; now
-  -- make every product equal to its ledger
-  update public.products p set quantity_in_stock = public.stock_derived(p.id)
-  where p.quantity_in_stock <> public.stock_derived(p.id);
 
   insert into public.app_settings (key, value) values ('stock_ledger_backfill', now()::text)
   on conflict (key) do nothing;
 end $$;
+
+-- Every run: make each product equal to its ledger. On the first run this
+-- is the reconciliation; afterwards it is a no-op unless something drifted
+-- (it heals the stock if anything ever wrote the counter around the ledger).
+select public.stock_resync();
 
 -- 4. One product per name (the merge above folds the old copies together
 --    first; until that has run the index is skipped, and the app itself
