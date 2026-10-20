@@ -195,11 +195,11 @@ create or replace view public.stock_reconciliation as
 
 -- 3. One-time reconciliation (marked in app_settings so re-runs skip it).
 --    The old register's opening counts did not always match the purchases
---    imported with them (two products had stock with no purchase rows, four
+--    imported with them (one product had stock with no purchase rows, seven
 --    had sold units before the system existed); those gaps are recorded as
---    "Opening stock" rows so the ledger explains the count. A product
---    entered on the Products page with a starting count and no movements
---    keeps it the same way. Then every product takes the ledger figure —
+--    "Opening stock" rows so the ledger explains the count. A product given
+--    a starting count on the Products page and never booked in keeps it the
+--    same way. Then every product takes the ledger figure —
 --    including below zero where units were sold that were never booked in,
 --    which the app now shows as out of stock until the purchase is entered.
 do $$
