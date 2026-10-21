@@ -1,10 +1,11 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { printArea } from "@/lib/print";
 import { money, shortDate, localToday } from "@/lib/format";
 import { PAYMENT_METHODS, methodLabel } from "@/lib/payments";
 import { matchesQuery } from "@/lib/search";
 import { allocatePaymentToInvoices } from "@/lib/allocate";
+import { fetchAll } from "@/lib/fetchAll";
 import { InvoiceQuickView } from "@/components/admin/InvoiceQuickView";
 import { PurchaseQuickView } from "@/components/admin/PurchaseQuickView";
 import { Button } from "@/components/ui/button";
@@ -262,13 +263,22 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
   const [itemsByRef, setItemsByRef] = useState<Record<string, LedgerItem[]>>({});
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState(() => blankEntry(kind));
-  const [current, setCurrent] = useState<number>(party.current_balance);
+  const [current, setCurrent] = useState<number>(Number(party.current_balance) || 0);
+  const [opening, setOpening] = useState<number>(Number(party.opening_balance) || 0);
   const [overdueInvoices, setOverdueInvoices] = useState<any[]>([]);
   const [viewInvoice, setViewInvoice] = useState<string | null>(null);
   const [viewPurchase, setViewPurchase] = useState<string | null>(null);
   const [amanat, setAmanat] = useState<AmanatRow[]>([]);
   const [amanatOpen, setAmanatOpen] = useState(false);
   const [showSettled, setShowSettled] = useState(false);
+  // The summary sits at the foot of the ledger; a new entry lands just
+  // above it, so scroll there once it has loaded.
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const jumpToSummary = useRef(false);
+  const goToBalance = () => summaryRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  useEffect(() => {
+    if (jumpToSummary.current) { jumpToSummary.current = false; goToBalance(); }
+  }, [entries]);
 
   // The real line items behind each bill reference, so the ledger shows
   // Product | Qty | Unit price | Total instead of one crammed note.
@@ -310,14 +320,21 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
     setItemsByRef(map);
   };
 
+  // Oldest first, like a ledger book: the account reads top to bottom and
+  // ends on the balance due. Paged, so a long account never loses its
+  // newest entries to the 1,000-row cap.
   const load = async () => {
-    const { data: e } = await (supabase.from(LEDGER_TABLE[kind]) as any)
+    const { data: e } = await fetchAll((a, b) => (supabase.from(LEDGER_TABLE[kind]) as any)
       .select("*").eq(FK[kind], party.id)
-      .order("entry_date", { ascending: false }).order("created_at", { ascending: false });
-    setEntries(e ?? []);
-    loadItems(e ?? []);
-    const { data: p } = await supabase.from(kind).select("current_balance").eq("id", party.id).maybeSingle();
-    if (p) setCurrent(Number(p.current_balance));
+      .order("entry_date", { ascending: true }).order("created_at", { ascending: true }).order("id")
+      .range(a, b));
+    setEntries(e);
+    loadItems(e);
+    const { data: p } = await supabase.from(kind).select("current_balance, opening_balance").eq("id", party.id).maybeSingle();
+    if (p) {
+      setCurrent(Number(p.current_balance) || 0);
+      setOpening(Number(p.opening_balance) || 0);
+    }
     if (kind === "clients") {
       const { data: inv } = await supabase.from("invoices")
         .select("id, invoice_id, total_amount, due_date, payment_status, created_at")
@@ -327,7 +344,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
     }
     const { data: am } = await supabase.from("amanat_items").select("*")
       .eq(FK[kind], party.id)
-      .order("given_date", { ascending: false }).order("created_at", { ascending: false });
+      .order("given_date", { ascending: true }).order("created_at", { ascending: true });
     setAmanat((am ?? []) as unknown as AmanatRow[]);
   };
   useEffect(() => { load(); }, [party.id]);
@@ -366,6 +383,7 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
     setForm(blankEntry(kind));
     setAddOpen(false);
     toast.success(`${shortLabel(form.entry_type)} of ${money(Number(form.amount))} recorded on ${shortDate(entryDate)}`);
+    jumpToSummary.current = true;
     load(); onChanged();
   };
   const del = async (id: string) => {
@@ -374,20 +392,21 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
     load(); onChanged();
   };
 
-  // Running balance: walk oldest → newest starting from the opening balance.
+  // Running balance: entries are oldest first, so walk them in order from
+  // the opening balance — the last row's balance is the balance due.
   const withRunning = useMemo(() => {
-    const asc = [...entries].reverse();
-    let bal = Number(party.opening_balance ?? 0);
+    let bal = opening;
     const map: Record<string, number> = {};
-    asc.forEach((e) => {
+    entries.forEach((e) => {
       bal += INCREASES[kind].includes(e.entry_type) ? Number(e.amount) : -Number(e.amount);
       map[e.id] = bal;
     });
     return map;
-  }, [entries, kind, party.opening_balance]);
+  }, [entries, kind, opening]);
 
   const totalUp = entries.filter((e) => INCREASES[kind].includes(e.entry_type)).reduce((a, e) => a + Number(e.amount), 0);
   const totalDown = entries.filter((e) => !INCREASES[kind].includes(e.entry_type)).reduce((a, e) => a + Number(e.amount), 0);
+  const showOpening = opening !== 0;
   const today = localToday();
   const isPaymentType = form.entry_type === "payment";
   const amanatPending = amanat.filter(isPending)
@@ -398,122 +417,24 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
 
   return (
     <div className="mt-4 space-y-4">
-      <div className="grid grid-cols-3 gap-2">
-        <div className="rounded-xl bg-primary/5 p-3">
-          <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{kind === "clients" ? "Total sales / udhar" : "Total purchases"}</div>
-          <div className="text-lg font-black">{money(totalUp + Number(party.opening_balance ?? 0))}</div>
-        </div>
-        <div className="rounded-xl bg-primary/5 p-3">
-          <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{kind === "clients" ? "Total recovered" : "Total paid"}</div>
-          <div className="text-lg font-black text-green-600">{money(totalDown)}</div>
-        </div>
-        <div className="rounded-xl bg-primary/5 p-3">
-          <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Balance due</div>
-          <div className={`text-lg font-black ${current > 0 ? "text-orange-500" : "text-green-600"}`}>{money(current)}</div>
-        </div>
-      </div>
-
-      {kind === "clients" && overdueInvoices.length > 0 && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3">
-          <div className="text-xs font-semibold text-destructive mb-2">Pending invoices</div>
-          {overdueInvoices.map((i) => (
-            <button key={i.id} onClick={() => setViewInvoice(i.invoice_id)}
-                    className="w-full flex items-center justify-between gap-3 text-xs py-2 border-b last:border-0 hover:bg-destructive/10 rounded px-1 -mx-1 text-left">
-              <span className="min-w-0">
-                <span className="block font-mono underline decoration-dotted truncate">{i.invoice_id}</span>
-                <span className="block text-muted-foreground">
-                  {shortDate(i.created_at)}
-                  {" · "}
-                  <span className={i.due_date && i.due_date < today ? "text-destructive font-semibold" : ""}>
-                    {i.due_date ? (i.due_date < today ? `overdue ${shortDate(i.due_date)}` : `due ${shortDate(i.due_date)}`) : "no due date"}
-                  </span>
-                </span>
-              </span>
-              <span className="font-bold whitespace-nowrap">{money(i.total_amount)}</span>
-            </button>
-          ))}
-          <div className="text-[10px] text-muted-foreground mt-1">Tap an invoice to see its full details.</div>
-        </div>
-      )}
-
-      {/* Amanat: items / money held in trust with this party, either way
-          round. Never part of the balance above — shown beside it. */}
-      {amanat.length > 0 && (
-        <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-3">
-          <div className="flex items-center justify-between gap-2 mb-1">
-            <div className="text-xs font-semibold text-blue-600 inline-flex items-center gap-1.5">
-              <PackageOpen className="h-3.5 w-3.5" /> Amanat — held in trust (not in balance)
-            </div>
-            {amanatPending.length > 0 && <span className="text-[10px] text-muted-foreground">{amanatPending.length} pending</span>}
-          </div>
-          <div className="text-[11px] text-muted-foreground mb-2">
-            They left with us: <b className="text-blue-600">{totalsText(amanatLeft)}</b>
-            {" · "}
-            They took from us: <b className="text-orange-500">{totalsText(amanatTaken)}</b>
-          </div>
-          {amanatPending.map((r) => {
-            const late = isOverdue(r, today);
-            const out = outstandingQty(r);
-            return (
-              <div key={r.id} className="flex items-center justify-between gap-3 text-xs py-2 border-b last:border-0">
-                <div className="min-w-0 space-y-0.5">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <DirectionChip direction={r.direction} />
-                    <StatusChip row={r} today={today} />
-                    <span className="font-mono text-[10px] text-muted-foreground">{r.amanat_no}</span>
-                  </div>
-                  <div className="font-semibold truncate">
-                    {amanatWhat(r)}
-                    {r.kind !== "money" && out < r.quantity && <span className="font-normal text-muted-foreground"> · {out} still out</span>}
-                  </div>
-                  <div className="text-muted-foreground">
-                    {shortDate(r.given_date)}
-                    {r.expected_return_date && (
-                      <span className={late ? "text-destructive font-semibold" : ""}>
-                        {" · "}{late ? "overdue" : "due"} {shortDate(r.expected_return_date)}
-                      </span>
-                    )}
-                    {r.notes && <span> · {r.notes}</span>}
-                  </div>
-                </div>
-                <Button size="sm" variant="outline" className="shrink-0 h-8" onClick={() => toggleAmanat(r)}>
-                  <PackageCheck className="h-3.5 w-3.5 mr-1" /> Mark received
-                </Button>
-              </div>
-            );
-          })}
-          {amanatSettled.length > 0 && (
-            <>
-              <button type="button" onClick={() => setShowSettled((s) => !s)}
-                      className="mt-1 text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-                {showSettled ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                {showSettled ? "Hide" : "Show"} {amanatSettled.length} received
-              </button>
-              {showSettled && amanatSettled.map((r) => (
-                <div key={r.id} className="flex items-center justify-between gap-3 text-xs py-1.5 border-t text-muted-foreground">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <DirectionChip direction={r.direction} />
-                      <StatusChip row={r} today={today} />
-                      <span className="text-foreground">{amanatWhat(r)}</span>
-                    </div>
-                    <div>{shortDate(r.given_date)} → {settledWord(r).toLowerCase()} {shortDate(r.returned_date)}</div>
-                  </div>
-                  <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" title="Reopen (still pending)" onClick={() => toggleAmanat(r)}>
-                    <Undo2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              ))}
-            </>
-          )}
-        </div>
-      )}
-
       {/* One button instead of a permanent form — keeps the account clean to
           read and to screenshot. Everything (sale, payment, credit, debit)
           lives inside the dialog. */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="font-semibold text-sm">Transaction history</div>
+        <div>
+          <div className="font-semibold text-sm">Transaction history</div>
+          <div className="text-[11px] text-muted-foreground">
+            Oldest first · balance due at the bottom
+            {entries.length > 8 && (
+              <>
+                {" · "}
+                <button type="button" className="text-primary underline decoration-dotted" onClick={goToBalance}>
+                  Go to balance ↓
+                </button>
+              </>
+            )}
+          </div>
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Dialog open={addOpen} onOpenChange={(o) => { setAddOpen(o); if (o) setForm(blankEntry(kind)); }}>
             <DialogTrigger asChild>
@@ -581,13 +502,27 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
         <div className="hidden print:block border-b-2 border-black pb-2 mb-3">
           <div className="text-lg font-black">{COMPANY.name} — Account Ledger</div>
           <div className="text-sm">
-            {party.name}{party.account_no ? ` (${party.account_no})` : ""} · Balance due {money(current)}
-            {amanatPending.length > 0 ? ` · ${amanatPending.length} amanat pending` : ""}
+            {party.name}{party.account_no ? ` (${party.account_no})` : ""} · Statement as of {shortDate(today)}
           </div>
+          {(party.phone || party.address) && (
+            <div className="text-xs">{[party.phone, party.address].filter(Boolean).join(" · ")}</div>
+          )}
         </div>
 
-        {/* Screen: one clean, readable card per transaction. */}
+        {/* Screen: one clean, readable card per transaction, oldest first,
+            each with the balance after it. */}
         <div className="divide-y print:hidden">
+          {showOpening && (
+            <div className="px-3 py-2.5 sm:px-4 flex items-center justify-between gap-3 bg-muted/30">
+              <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-muted text-muted-foreground">
+                Opening balance (brought forward)
+              </span>
+              <div className="text-right">
+                <div className="text-base font-black whitespace-nowrap">{money(opening)}</div>
+                <div className="text-[11px] text-muted-foreground whitespace-nowrap">Balance {money(opening)}</div>
+              </div>
+            </div>
+          )}
           {entries.map((e) => {
             const up = INCREASES[kind].includes(e.entry_type);
             const hasInvoice = kind === "clients" && typeof e.reference === "string" && e.reference.startsWith("INV");
@@ -677,6 +612,16 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
             </tr>
           </thead>
           <tbody>
+            {showOpening && (
+              <tr className="border-t">
+                <td className="p-1.5">—</td>
+                <td className="p-1.5">Opening balance (brought forward)</td>
+                <td className="p-1.5 text-center">—</td>
+                <td className="p-1.5 text-right">—</td>
+                <td className="p-1.5 text-right whitespace-nowrap">{money(opening)}</td>
+                <td className="p-1.5 text-right whitespace-nowrap">{money(opening)}</td>
+              </tr>
+            )}
             {entries.map((e) => {
               const up = INCREASES[kind].includes(e.entry_type);
               const items = itemsFor(e);
@@ -720,8 +665,40 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
           </tbody>
         </table>
 
-        {/* Print: open amanat after the ledger — held in trust, so it is
-            listed beside the balance and never added into it. */}
+        {/* Summary at the foot of the statement, on screen and on paper:
+            opening + additions − payments = the balance due, read last. */}
+        <div ref={summaryRef}
+             className="print-avoid-break border-t-2 bg-muted/40 px-3 py-3 sm:px-4 text-sm space-y-1 print:bg-transparent print:border-black print:mt-2">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Summary</div>
+          {showOpening && <SummaryRow label="Opening balance" value={money(opening)} />}
+          <SummaryRow label={kind === "clients" ? "Total sales / udhar (+)" : "Total purchases (+)"}
+                      value={money(totalUp)} className="text-orange-500" />
+          <SummaryRow label={kind === "clients" ? "Total recovered (−)" : "Total paid (−)"}
+                      value={money(totalDown)} className="text-green-600" />
+          {kind === "clients" && overdueInvoices.length > 0 && (
+            <SummaryRow label="Unpaid invoices" value={String(overdueInvoices.length)} />
+          )}
+          {amanatPending.length > 0 && (
+            <SummaryRow label="Amanat pending (not in balance)" value={String(amanatPending.length)} className="text-blue-600" />
+          )}
+          <div className="flex items-end justify-between gap-3 border-t pt-2 mt-2 print:border-black">
+            <div>
+              <div className="font-bold">Net balance due</div>
+              {current < 0 && (
+                <div className="text-[11px] text-muted-foreground">
+                  {kind === "clients" ? "Advance — customer is in credit" : "Advance paid to merchant"}
+                </div>
+              )}
+              {current === 0 && <div className="text-[11px] text-muted-foreground">Account clear</div>}
+            </div>
+            <div className={`text-xl font-black whitespace-nowrap ${current > 0 ? "text-orange-500" : "text-green-600"}`}>
+              {money(current)}
+            </div>
+          </div>
+        </div>
+
+        {/* Print: open amanat after the summary — held in trust, so it is
+            listed apart from the balance and never added into it. */}
         {amanatPending.length > 0 && (
           <div className="hidden print:block mt-4">
             <div className="text-sm font-bold border-b pb-1 mb-1">Amanat — held in trust (not in balance)</div>
@@ -757,8 +734,115 @@ function LedgerView({ party, kind, onChanged }: { party: any; kind: PartyKind; o
         )}
       </div>
 
+      {/* After the statement: the unpaid bills behind the balance, earliest
+          due first, then amanat. */}
+      {kind === "clients" && overdueInvoices.length > 0 && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3">
+          <div className="text-xs font-semibold text-destructive mb-2">Pending invoices</div>
+          {overdueInvoices.map((i) => (
+            <button key={i.id} onClick={() => setViewInvoice(i.invoice_id)}
+                    className="w-full flex items-center justify-between gap-3 text-xs py-2 border-b last:border-0 hover:bg-destructive/10 rounded px-1 -mx-1 text-left">
+              <span className="min-w-0">
+                <span className="block font-mono underline decoration-dotted truncate">{i.invoice_id}</span>
+                <span className="block text-muted-foreground">
+                  {shortDate(i.created_at)}
+                  {" · "}
+                  <span className={i.due_date && i.due_date < today ? "text-destructive font-semibold" : ""}>
+                    {i.due_date ? (i.due_date < today ? `overdue ${shortDate(i.due_date)}` : `due ${shortDate(i.due_date)}`) : "no due date"}
+                  </span>
+                </span>
+              </span>
+              <span className="font-bold whitespace-nowrap">{money(i.total_amount)}</span>
+            </button>
+          ))}
+          <div className="text-[10px] text-muted-foreground mt-1">Tap an invoice to see its full details.</div>
+        </div>
+      )}
+
+      {/* Amanat: items / money held in trust with this party, either way
+          round. Never part of the balance above — listed after it. */}
+      {amanat.length > 0 && (
+        <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-3">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="text-xs font-semibold text-blue-600 inline-flex items-center gap-1.5">
+              <PackageOpen className="h-3.5 w-3.5" /> Amanat — held in trust (not in balance)
+            </div>
+            {amanatPending.length > 0 && <span className="text-[10px] text-muted-foreground">{amanatPending.length} pending</span>}
+          </div>
+          <div className="text-[11px] text-muted-foreground mb-2">
+            They left with us: <b className="text-blue-600">{totalsText(amanatLeft)}</b>
+            {" · "}
+            They took from us: <b className="text-orange-500">{totalsText(amanatTaken)}</b>
+          </div>
+          {amanatPending.map((r) => {
+            const late = isOverdue(r, today);
+            const out = outstandingQty(r);
+            return (
+              <div key={r.id} className="flex items-center justify-between gap-3 text-xs py-2 border-b last:border-0">
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <DirectionChip direction={r.direction} />
+                    <StatusChip row={r} today={today} />
+                    <span className="font-mono text-[10px] text-muted-foreground">{r.amanat_no}</span>
+                  </div>
+                  <div className="font-semibold truncate">
+                    {amanatWhat(r)}
+                    {r.kind !== "money" && out < r.quantity && <span className="font-normal text-muted-foreground"> · {out} still out</span>}
+                  </div>
+                  <div className="text-muted-foreground">
+                    {shortDate(r.given_date)}
+                    {r.expected_return_date && (
+                      <span className={late ? "text-destructive font-semibold" : ""}>
+                        {" · "}{late ? "overdue" : "due"} {shortDate(r.expected_return_date)}
+                      </span>
+                    )}
+                    {r.notes && <span> · {r.notes}</span>}
+                  </div>
+                </div>
+                <Button size="sm" variant="outline" className="shrink-0 h-8" onClick={() => toggleAmanat(r)}>
+                  <PackageCheck className="h-3.5 w-3.5 mr-1" /> Mark received
+                </Button>
+              </div>
+            );
+          })}
+          {amanatSettled.length > 0 && (
+            <>
+              <button type="button" onClick={() => setShowSettled((s) => !s)}
+                      className="mt-1 text-[11px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+                {showSettled ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                {showSettled ? "Hide" : "Show"} {amanatSettled.length} received
+              </button>
+              {showSettled && amanatSettled.map((r) => (
+                <div key={r.id} className="flex items-center justify-between gap-3 text-xs py-1.5 border-t text-muted-foreground">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <DirectionChip direction={r.direction} />
+                      <StatusChip row={r} today={today} />
+                      <span className="text-foreground">{amanatWhat(r)}</span>
+                    </div>
+                    <div>{shortDate(r.given_date)} → {settledWord(r).toLowerCase()} {shortDate(r.returned_date)}</div>
+                  </div>
+                  <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" title="Reopen (still pending)" onClick={() => toggleAmanat(r)}>
+                    <Undo2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
       <InvoiceQuickView invoiceRef={viewInvoice} onClose={() => setViewInvoice(null)} />
       <PurchaseQuickView purchaseRef={viewPurchase} onClose={() => setViewPurchase(null)} />
+    </div>
+  );
+}
+
+function SummaryRow({ label, value, className }: { label: string; value: string; className?: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`font-semibold whitespace-nowrap ${className ?? ""}`}>{value}</span>
     </div>
   );
 }
